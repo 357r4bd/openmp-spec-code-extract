@@ -1,0 +1,11 @@
+This suite has the potentially to become a useful set of tools for maintaining a single
+set of example source snippets and full programs, used for inclusion in the specification
+and for testing purposes.
+
+* look at incorporating using TAP for tests, maybe libtap (https://github.com/pozorvlak/libtap)
+
+* clean up workflow, fully implement meta-tags so that a real suite of examples can be maintained
+
+* denote what examples are snippets, working code, valid examples, counter examples, etc
+
+* take a look at the test suite used by Cray's Chapel language; this is a nice example of now to do it
