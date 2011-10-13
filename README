@@ -1,0 +1,13 @@
+This is a suite of Perl and Bourne Shell scripts that I wrote
+while at the University of Houston's Department of Computer Science
+HPCTools Group (http://www.cs.uh.edu/~hpctools) to help the OpenMP
+ARB automate the extraction, testing, and validation of the examples
+in Appendix A of the, then, specification version 3.1 draft.
+
+I am placing it on Github in the hopes that others find it useful, including
+those that continue tobe involved in the OpenMP Specification process -
+something I found to be quite interesting and enjoyable.
+
+It's release under the TWTFYW license. See ./LICENSE for more info.
+
+B. Estrade - 12 Oct. 2011.
