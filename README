@@ -8,7 +8,7 @@ I am placing it on Github in the hopes that others find it useful, including
 those that continue tobe involved in the OpenMP Specification process -
 something I found to be quite interesting and enjoyable.
 
-It's release under the TWTFYW license. See ./LICENSE for more info.
+It's release under the BSD license. See ./LICENSE for more info.
 
 B. Estrade - 12 Oct. 2011.
 
