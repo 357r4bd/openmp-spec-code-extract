@@ -5,8 +5,12 @@ ARB automate the extraction, testing, and validation of the examples
 in Appendix A of the, then, specification version 3.1 draft.
 
 I am placing it on Github in the hopes that others find it useful, including
-those that continue tobe involved in the OpenMP Specification process -
+those that continue to be involved in the OpenMP Specification process -
 something I found to be quite interesting and enjoyable.
+
+*PLEASE FORK THIS SUITE. I PLAN NO REAL IMPROVEMENTS UNTIL SUCH TIME AS
+I FIND IT PERSONALLY USEFUL AGAIN. I AM HAPPY TO PROVIDE ASSISTANCE TO
+ANYONE WHO UNDERTAKES THIS EFFORT.*
 
 It's release under the BSD license. See ./LICENSE for more info.
 
