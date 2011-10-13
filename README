@@ -11,3 +11,32 @@ something I found to be quite interesting and enjoyable.
 It's release under the TWTFYW license. See ./LICENSE for more info.
 
 B. Estrade - 12 Oct. 2011.
+
+Workflow:
+
+1. run 'make'
+2. compile all with script, records successes and failures:
+	a. sh compile.sh | grep OKAY > okay.out
+	b. sh compile.sh | grep FAIL > fail.out
+3. review all OKAY:
+	* should it be passing or is it an unexpected success (i.e., a counter example?)
+	* if passing okay, is it consistent with what it's supposed to be examlemplifying? 
+4. review all FAIL:
+	* should it be failing? 
+		- if so, is it failing in the right way?
+	* if not, why is it failing
+		- is it a snipped and will it pass with some skeleton code? what?
+		- if error in syntax? what to fix?
+5. other
+	* are examples consistent within each base language, among all base languages?
+	* how to denote examples in text to denote:
+		- snippet/full
+		- should pass/should pass (but is, say, non-conforming)/should fail/etc 
+		  for use in testing infrastructure
+		
+Questions:
+- how to pass on suggested changes/fixes?
+- what to do with modified files - save somehow to make the next go-around easier, more efficient?
+	Most likely the workflow should be that one set of files is generated per draft update.
+	And assuming all changes to be applied have been applied, there should be no duplication in 
+	effort.

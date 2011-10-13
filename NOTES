@@ -1,0 +1,4 @@
+For code exmaple annotations, what's the minimal amount of useful information I need 
+to determinal the minimal set of source attributes I need to determine if the code
+example is meant to be compilable or not, a comforming example or not, etc? The goal
+is to automatically determine usage in a testing framework.

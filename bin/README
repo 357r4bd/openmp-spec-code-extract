@@ -1,0 +1,38 @@
+1. appendixA-to-text.sh
+
+This script uses pdftotext to dump Appendix A. It has hard coded start and stop
+pages, so make sure they reflect the pages that contain Appendix A.
+
+2. build-dump.pl
+
+This script takes the text file created by appendixA-to-text.sh and extracts
+the source code into a single file. Each snippet is denoted with information that
+was able to be gleaned during the dump process; for example, C/C++ or Fortran.
+There is also an attempt to figure out if it is a full C/C++ or Fortran program,
+but this determinatoin is naive. If it is deamed to be a snippet, some code
+is added based on the source language it represents. 
+
+The idea of having a single file is to allow someone to conveniently edit
+either the source of each snippet or meta-data about each snippet contained
+in a comment section created at the top of the snippet.  At this point, split-dump.pl
+doesn't really use this information. It was meant to provide snippet specific
+information to any extending of split-dump.pl that is done.
+
+3. split-dump.pl
+
+This file takes the dump file created by build-dump.pl (and potentially edited
+by a human) and generates individual files. The directory hierarchy that it currently
+uses to distribute the files reflects: 1) the source language and 2) if it
+is a snippet or full example.
+
+4. expected-examples.sh
+
+This script simply greps the text form of Appendix A created by appendixA-to-text.sh
+in order to create a list of expected examples build-dump.pl is meant to find.
+Neither the script nor the generated list is used by build-dump.pl to find 
+the examples or build the dump file, but it is used to verify that it found all 
+expected examples in Appendix A.
+
+5. test-singles-compile.sh
+
+This is an attempt at a testing harness. It's very alpha.

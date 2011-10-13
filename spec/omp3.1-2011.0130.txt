@@ -1,0 +1,5697 @@
+1          A
+
+
+
+
+2              Examples
+
+3              The following are examples of the constructs and routines defined in this document.
+
+                                                     C/C++
+4              A statement following a directive is compound only when necessary, and a non-
+5              compound statement is indented with respect to a directive preceding it.
+                                                     C/C++
+
+
+
+
+6    A.1       A Simple Parallel Loop
+7              The following example demonstrates how to parallelize a simple loop using the parallel
+8              loop construct (Section 2.6.1 on page 54). The loop iteration variable is private by
+9              default, so it is not necessary to specify it explicitly in a private clause.
+
+
+                                                     C/C++
+               Example A.1.1c
+
+10             void simple(int n, float *a, float *b)
+11             {
+12                 int i;
+
+13             #pragma omp parallel for
+14                 for (i=1; i<n; i++) /* i is private by default */
+15                     b[i] = (a[i] + a[i-1]) / 2.0;
+16             }
+                                                     C/C++
+
+
+
+
+                                                                   Appendix A      Examples      159
+                                                          Fortran
+                  Example A.1.1f
+
+1                     SUBROUTINE SIMPLE(N, A, B)
+
+2                        INTEGER I, N
+3                        REAL B(N), A(N)
+
+4                 !$OMP PARALLEL DO !I is private by default
+5                       DO I=2,N
+6                           B(I) = (A(I) + A(I-1)) / 2.0
+7                       ENDDO
+8                 !$OMP END PARALLEL DO
+
+9                     END SUBROUTINE SIMPLE
+
+                                                          Fortran
+
+
+
+
+10   A.2          The OpenMP Memory Model
+11                In the following example, at Print 1, the value of x could be either 2 or 5, depending on
+12                the timing of the threads, and the implementation of the assignment to x. There are two
+13                reasons that the value at Print 1 might not be 5. First, Print 1 might be executed before
+14                the assignment to x is executed. Second, even if Print 1 is executed after the assignment,
+15                the value 5 is not guaranteed to be seen by thread 1 because a flush may not have been
+16                executed by thread 0 since the assignment.
+
+
+
+
+     160   OpenMP API • DRAFT Version 3.1.2011-0130
+1    The barrier after Print 1 contains implicit flushes on all threads, as well as a thread
+2    synchronization, so the programmer is guaranteed that the value 5 will be printed by
+3    both Print 2 and Print 3.
+
+
+                                             C/C++
+     Example A.2.1c
+
+4    #include <stdio.h>
+5    #include <omp.h>
+
+ 6   int main(){
+ 7     int x;
+ 8
+ 9       x = 2;
+10       #pragma omp parallel num_threads(2) shared(x)
+11       {
+
+12         if (omp_get_thread_num() == 0) {
+13            x = 5;
+14         } else {
+15         /* Print 1: the following read of x has a race */
+16           printf("1: Thread# %d: x = %d\n", omp_get_thread_num(),x );
+17         }
+18
+19         #pragma omp barrier
+20
+21         if (omp_get_thread_num() == 0) {
+22         /* Print 2 */
+23           printf("2: Thread# %d: x = %d\n", omp_get_thread_num(),x );
+24         } else {
+25         /* Print 3 */
+26           printf("3: Thread# %d: x = %d\n", omp_get_thread_num(),x );
+27         }
+28       }
+29       return 0;
+30   }
+                                             C/C++
+
+
+
+
+                                                           Appendix A       Examples      161
+                                                          Fortran
+                  Example A.2.1f
+
+ 1                PROGRAM MEMMODEL
+ 2                  INCLUDE "omp_lib.h"           ! or USE OMP_LIB
+ 3                  INTEGER X
+ 4
+ 5                  X = 2
+ 6                !$OMP PARALLEL NUM_THREADS(2) SHARED(X)
+ 7
+ 8                    IF (OMP_GET_THREAD_NUM() .EQ. 0) THEN
+ 9                       X = 5
+10                    ELSE
+11                    ! PRINT 1: The following read of x has a race
+12                      PRINT *,"1: THREAD# ", OMP_GET_THREAD_NUM(), "X = ", X
+13                    ENDIF
+14
+15                 !$OMP BARRIER
+16
+17                    IF (OMP_GET_THREAD_NUM() .EQ. 0) THEN
+18                    ! PRINT 2
+19                      PRINT *,"2: THREAD# ", OMP_GET_THREAD_NUM(), "X = ", X
+20                    ELSE
+21                    ! PRINT 3
+22                      PRINT *,"3: THREAD# ", OMP_GET_THREAD_NUM(), "X = ", X
+23                    ENDIF
+24
+25                !$OMP END PARALLEL
+
+26                END PROGRAM MEMMODEL
+
+                                                          Fortran
+27                The following example demonstrates why synchronization is difficult to perform
+28                correctly through variables. The value of flag is undefined in both prints on thread 1 and
+29                the value of data is only well-defined in the second print.
+
+
+
+
+     162   OpenMP API • DRAFT Version 3.1.2011-0130
+                                       C/C++
+     Example A.2.2c
+
+ 1   #include <omp.h>
+ 2   #include <stdio.h>
+ 3   int main()
+ 4   {
+ 5       int data;
+ 6       int flag=0;
+ 7       #pragma omp parallel
+ 8         {
+ 9           if (omp_get_thread_num()==0)
+10            {
+11                /* Write to the data buffer that will be
+12                read by thread */
+13                data = 42;
+14                /* Flush data to thread 1 and strictly order
+15                the write to data
+16                relative to the write to the flag */
+17                #pragma omp flush(flag, data)
+18                /* Set flag to release thread 1 */
+19                flag = 1;
+20                /* Flush flag to ensure that thread 1 sees
+21                the change */
+22                #pragma omp flush(flag)
+23            }
+24           else if(omp_get_thread_num()==1)
+25            {
+26                /* Loop until we see the update to the flag */
+27                #pragma omp flush(flag, data)
+28                while (flag < 1)
+29                  {
+30                    #pragma omp flush(flag, data)
+31                  }
+32                /* Values of flag and data are undefined */
+33                printf("flag=%d data=%d\n", flag, data);
+34                #pragma omp flush(flag, data)
+35                /* Values data will be 42, value of flag
+36                still undefined */
+37                printf("flag=%d data=%d\n", flag, data);
+38            }
+39       }
+40   }
+                                       C/C++
+
+
+
+
+                                                   Appendix A      Examples   163
+                                                        Fortran
+                  Example A.2.2f
+
+1                         PROGRAM   EXAMPLE
+2                         INCLUDE   "omp_lib.h" ! or USE OMP_LIB
+3                         INTEGER   DATA
+4                         INTEGER   FLAG
+
+ 5                        FLAG = 0
+ 6                        !$OMP PARALLEL
+ 7                          IF(OMP_GET_THREAD_NUM() .EQ. 0) THEN
+ 8                                  ! Write to the data buffer that will be read by thread 1
+ 9                                  DATA = 42
+10                                 ! Flush DATA to thread 1 and strictly order the write to DATA
+11                                  ! relative to the write to the FLAG
+12                                  !$OMP FLUSH(FLAG, DATA)
+13                                  ! Set FLAG to release thread 1
+14                                  FLAG = 1;
+15                                  ! Flush FLAG to ensure that thread 1 sees the change */
+16                                  !$OMP FLUSH(FLAG)
+17                          ELSE IF(OMP_GET_THREAD_NUM() .EQ. 1) THEN
+18                                  ! Loop until we see the update to the FLAG
+19                                  !$OMP FLUSH(FLAG, DATA)
+20                                  DO WHILE(FLAG .LT. 1)
+21                                          !$OMP FLUSH(FLAG, DATA)
+22                                  ENDDO
+
+23                                    ! Values of FLAG and DATA are undefined
+24                                    PRINT *, 'FLAG=', FLAG, ' DATA=', DATA
+25                                    !$OMP FLUSH(FLAG, DATA)
+
+26                                    !Values DATA will be 42, value of FLAG still undefined */
+27                                    PRINT *, 'FLAG=', FLAG, ' DATA=', DATA
+28                          ENDIF
+29                        !$OMP END PARALLEL
+30                        END
+
+                                                        Fortran
+31                This example demonstrates why synchronization is difficult to perform correctly through
+32                variables. Because the write(1)-flush(1)-flush(2)-read(2) sequence cannot be guaranteed
+33                in the example, the statements on thread 1 and thread 2 may execute in either order.
+
+
+
+
+     164   OpenMP API • DRAFT Version 3.1.2011-0130
+                                       C/C++
+     Example A.2.3c
+
+1    #include <omp.h>
+2    #include <stdio.h>
+3    int main()
+4    {
+5             int flag=0;
+
+ 6           #pragma omp parallel
+ 7           {
+ 8                   if(omp_get_thread_num()==0)
+ 9                   {
+10                           /* Set flag to release thread 1 */
+11                           #pragma omp atomic update
+12                           flag++;
+13                         /* Flush of flag is implied by the atomic directive */
+14                   }
+15                   else if(omp_get_thread_num()==1)
+16                   {
+17                           /* Loop until we see that flag reaches 1*/
+18                           #pragma omp flush(flag)
+19                           while(flag < 1)
+20                           {
+21                                   #pragma omp flush(flag)
+22                           }
+23                           printf("Thread 1 awoken\n");
+
+24                            /* Set flag to release thread 2 */
+25                            #pragma omp atomic update
+26                            flag++;
+27                          /* Flush of flag is implied by the atomic directive */
+28                    }
+29                    else if(omp_get_thread_num()==2)
+30                    {
+31                            /* Loop until we see that flag reaches 2 */
+32                            #pragma omp flush(flag)
+33                            while(flag < 2)
+34                            {
+35                                    #pragma omp flush(flag)
+36                            }
+37                            printf("Thread 2 awoken\n");
+38                    }
+39           }
+40   }
+                                       C/C++
+
+
+
+
+                                                   Appendix A    Examples     165
+                                                     Fortran
+                  Example A.2.3f
+
+1                       PROGRAM EXAMPLE
+2                       INCLUDE "omp_lib.h" ! or USE OMP_LIB
+3                       INTEGER FLAG
+
+ 4                      FLAG = 0
+ 5                      !$OMP PARALLEL
+ 6                        IF(OMP_GET_THREAD_NUM() .EQ. 0) THEN
+ 7                                ! Set flag to release thread 1
+ 8                                !$OMP ATOMIC UPDATE
+ 9                                        FLAG = FLAG + 1
+10                                !Flush of FLAG is implied by the atomic directive
+11                        ELSE IF(OMP_GET_THREAD_NUM() .EQ. 1) THEN
+12                                        ! Loop until we see that FLAG reaches 1
+13                                        !$OMP FLUSH(FLAG, DATA)
+14                                        DO WHILE(FLAG .LT. 1)
+15                                                !$OMP FLUSH(FLAG, DATA)
+16                                        ENDDO
+
+17                                           PRINT *, 'Thread 1 awoken'
+
+18                                        ! Set FLAG to release thread 2
+19                                        !$OMP ATOMIC UPDATE
+20                                                FLAG = FLAG + 1
+21                                        !Flush of FLAG is implied by the atomic directive
+22                        ELSE IF(OMP_GET_THREAD_NUM() .EQ. 2) THEN
+23                                        ! Loop until we see that FLAG reaches 2
+24                                        !$OMP FLUSH(FLAG, DATA)
+25                                        DO WHILE(FLAG .LT. 2)
+26                                                !$OMP FLUSH(FLAG,    DATA)
+27                                        ENDDO
+
+28                                           PRINT *, 'Thread 2 awoken'
+29                        ENDIF
+30                      !$OMP END PARALLEL
+31                      END
+
+                                                     Fortran
+
+
+
+
+     166   OpenMP API • DRAFT Version 3.1.2011-0130
+1    A.3   Conditional Compilation
+                                                  C/C++
+2          The following example illustrates the use of conditional compilation using the OpenMP
+3          macro _OPENMP (Section 2.2 on page 26). With OpenMP compilation, the _OPENMP
+4          macro becomes defined.
+
+
+                                                  C/C++
+           Example A.3.1c
+
+5          #include <stdio.h>
+
+6          int main()
+7          {
+
+ 8         # ifdef _OPENMP
+ 9             printf("Compiled by an OpenMP-compliant implementation.\n");
+10         # endif
+
+11             return 0;
+12         }
+                                                  C/C++
+
+                                                  Fortran
+13         The following example illustrates the use of the conditional compilation sentinel (see
+14         Section 2.2 on page 26). With OpenMP compilation, the conditional compilation
+15         sentinel !$ is recognized and treated as two spaces. In fixed form source, statements
+16         guarded by the sentinel must start after column 6.
+
+
+                                                  Fortran
+           Example A.3.1f
+
+17               PROGRAM EXAMPLE
+
+18         C234567890
+19         !$    PRINT *, "Compiled by an OpenMP-compliant implementation."
+
+20               END PROGRAM EXAMPLE
+
+                                                  Fortran
+
+
+
+
+                                                                Appendix A      Examples       167
+1    A.4          Internal Control Variables (ICVs)
+2                 According to Section 2.3 on page 28, an OpenMP implementation must act as if there
+3                 are ICVs that control the behavior of the program. This example illustrates two ICVs,
+4                 nthreads-var and max-active-levels-var. The nthreads-var ICV controls the number of
+5                 threads requested for encountered parallel regions; there is one copy of this ICV per
+6                 task. The max-active-levels-var ICV controls the maximum number of nested active
+7                 parallel regions; there is one copy of this ICV for the whole program.
+ 8                In the following example, the nest-var, max-active-levels-var, dyn-var, and nthreads-var
+ 9                ICVs are modified through calls to the runtime library routines omp_set_nested,
+10                omp_set_max_active_levels, omp_set_dynamic, and
+11                omp_set_num_threads respectively. This example assumes that nested parallelism
+12                is supported.
+13                These ICVs affect the operation of parallel regions. Each implicit task generated by a
+14                parallel region has its own copy of the nest-var, dyn-var, and nthreads-var. In the
+15                example, the new value of nthreads-var applies only to the implicit tasks that execute
+16                the call to omp_set_num_threads. There is one copy of the max-active-levels-var
+17                for the whole program; its value is the same for all tasks.
+18                The outer parallel region creates a team of two threads; each of the threads will execute
+19                one of the two implicit tasks generated by the outer parallel region.
+20                Each implicit task generated by the outer parallel region calls
+21                omp_set_num_threads(3), assigning the value 3 to its respective copy of
+22                nthreads-var. Then each implicit task encounters an inner parallel region that creates a
+23                team of three threads; each of the threads will execute one of the three implicit tasks
+24                generated by that inner parallel region.
+25                Since the outer parallel region is executed by 2 threads, and the inner by 3, there will be
+26                a total of 6 implicit tasks generated by the two inner parallel regions.
+27                Each implicit task generated by an inner parallel region will execute the call to
+28                omp_set_num_threads(4), assigning the value 4 to its respective copy of
+29                nthreads-var.
+30                The print statement in the outer parallel region is executed by only one of the threads in
+31                the team. So it will be executed only once.
+32                The print statement in an inner parallel region is also executed by only one of the
+33                threads in the team. Since we have a total of two inner parallel regions, the print
+34                statement will be executed twice (once per inner parallel region).
+
+
+
+
+     168   OpenMP API • DRAFT Version 3.1.2011-0130
+                                         C/C++
+     Example A.4.1c
+
+1    #include <stdio.h>
+2    #include <omp.h>
+
+ 3   int main (void)
+ 4   {
+ 5     omp_set_nested(1);
+ 6     omp_set_max_active_levels(8);
+ 7     omp_set_dynamic(0);
+ 8     omp_set_num_threads(2);
+ 9     #pragma omp parallel
+10       {
+11         omp_set_num_threads(3);
+
+12           #pragma omp parallel
+13             {
+14               omp_set_num_threads(4);
+15               #pragma omp single
+16                 {
+17                   /*
+18                    * The following should print:
+19                    * Inner: max_act_lev=8, num_thds=3, max_thds=4
+20                    * Inner: max_act_lev=8, num_thds=3, max_thds=4
+21                    */
+22                   printf ("Inner: max_act_lev=%d, num_thds=%d, max_thds=%d\n",
+23                   omp_get_max_active_levels(), omp_get_num_threads(),
+24                   omp_get_max_threads());
+25                 }
+26             }
+
+27           #pragma omp barrier
+28           #pragma omp single
+29             {
+30               /*
+31                * The following should print:
+32                * Outer: max_act_lev=8, num_thds=2, max_thds=3
+33                */
+34               printf ("Outer: max_act_lev=%d, num_thds=%d, max_thds=%d\n",
+35                       omp_get_max_active_levels(), omp_get_num_threads(),
+36                       omp_get_max_threads());
+37             }
+38       }
+39   }
+                                         C/C++
+
+
+
+
+                                                    Appendix A    Examples      169
+                                                       Fortran
+                  Example A.4.1f
+
+1                       program icv
+2                       use omp_lib
+
+3                       call   omp_set_nested(.true.)
+4                       call   omp_set_max_active_levels(8)
+5                       call   omp_set_dynamic(.false.)
+6                       call   omp_set_num_threads(2)
+
+7                 !$omp parallel
+8                       call omp_set_num_threads(3)
+
+ 9                !$omp parallel
+10                       call omp_set_num_threads(4)
+11                !$omp single
+12                !       The following should print:
+13                !       Inner: max_act_lev= 8 , num_thds= 3 , max_thds= 4
+14                !       Inner: max_act_lev= 8 , num_thds= 3 , max_thds= 4
+15                        print *, "Inner: max_act_lev=", omp_get_max_active_levels(),
+16                     &            ", num_thds=", omp_get_num_threads(),
+17                     &            ", max_thds=", omp_get_max_threads()
+18                !$omp end single
+19                !$omp end parallel
+
+20                !$omp barrier
+21                !$omp single
+22                !      The following should print:
+23                !      Outer: max_act_lev= 8 , num_thds= 2 , max_thds= 3
+24                       print *, "Outer: max_act_lev=", omp_get_max_active_levels(),
+25                     &           ", num_thds=", omp_get_num_threads(),
+26                     &           ", max_thds=", omp_get_max_threads()
+27                !$omp end single
+28                !$omp end parallel
+29                       end
+
+                                                       Fortran
+
+
+
+
+30   A.5          The parallel Construct
+31                The parallel construct (Section 2.4 on page 32) can be used in coarse-grain parallel
+32                programs. In the following example, each thread in the parallel region decides what
+33                part of the global array x to work on, based on the thread number:
+
+
+
+
+     170   OpenMP API • DRAFT Version 3.1.2011-0130
+                                         C/C++
+     Example A.5.1c
+
+1    #include <omp.h>
+
+2    void subdomain(float *x, int istart, int ipoints)
+3    {
+4      int i;
+
+5        for (i = 0; i < ipoints; i++)
+6            x[istart+i] = 123.456;
+7    }
+
+ 8   void sub(float *x, int npoints)
+ 9   {
+10       int iam, nt, ipoints, istart;
+
+11   #pragma omp parallel default(shared) private(iam,nt,ipoints,istart)
+12       {
+13           iam = omp_get_thread_num();
+14           nt = omp_get_num_threads();
+15           ipoints = npoints / nt;     /* size of partition */
+16           istart = iam * ipoints; /* starting array index */
+17           if (iam == nt-1)     /* last thread may do more */
+18             ipoints = npoints - istart;
+19           subdomain(x, istart, ipoints);
+20       }
+21   }
+
+22   int main()
+23   {
+24       float array[10000];
+
+25         sub(array, 10000);
+
+26         return 0;
+27   }
+                                         C/C++
+
+
+
+
+                                                  Appendix A    Examples   171
+                                                      Fortran
+                  Example A.5.1f
+
+1                        SUBROUTINE SUBDOMAIN(X, ISTART, IPOINTS)
+2                            INTEGER ISTART, IPOINTS
+3                            REAL X(*)
+
+4                           INTEGER I
+5
+6                           DO 100 I=1,IPOINTS
+7                              X(ISTART+I) = 123.456
+8                  100      CONTINUE
+
+9                        END SUBROUTINE SUBDOMAIN
+
+10                       SUBROUTINE SUB(X, NPOINTS)
+11                           INCLUDE "omp_lib.h"       ! or USE OMP_LIB
+12
+13                          REAL X(*)
+14                          INTEGER NPOINTS
+15                          INTEGER IAM, NT, IPOINTS, ISTART
+
+16                !$OMP PARALLEL DEFAULT(PRIVATE) SHARED(X,NPOINTS)
+17
+18                          IAM = OMP_GET_THREAD_NUM()
+19                          NT = OMP_GET_NUM_THREADS()
+20                          IPOINTS = NPOINTS/NT
+21                          ISTART = IAM * IPOINTS
+22                          IF (IAM .EQ. NT-1) THEN
+23                              IPOINTS = NPOINTS - ISTART
+24                          ENDIF
+25                          CALL SUBDOMAIN(X,ISTART,IPOINTS)
+
+26                !$OMP END PARALLEL
+27                      END SUBROUTINE SUB
+
+28                       PROGRAM PAREXAMPLE
+29                           REAL ARRAY(10000)
+30                           CALL SUB(ARRAY, 10000)
+31                       END PROGRAM PAREXAMPLE
+
+                                                      Fortran
+
+
+
+
+     172   OpenMP API • DRAFT Version 3.1.2011-0130
+1    A.6   Interaction Between the num_threads
+2          Clause and omp_set_dynamic
+3          The following example demonstrates the num_threads clause (Section 2.4 on page
+4          32) and the effect of the omp_set_dynamic routine (Section 3.2.7 on page 121)
+5          on it.
+ 6         The call to the omp_set_dynamic routine with argument 0 in C/C++, or .FALSE.
+ 7         in Fortran, disables the dynamic adjustment of the number of threads in OpenMP
+ 8         implementations that support it. In this case, 10 threads are provided. Note that in case
+ 9         of an error the OpenMP implementation is free to abort the program or to supply any
+10         number of threads available.
+
+
+
+                                                   C/C++
+           Example A.6.1c
+
+11         #include <omp.h>
+12         int main()
+13         {
+14           omp_set_dynamic(0);
+15           #pragma omp parallel num_threads(10)
+16           {
+17             /* do work here */
+18           }
+19           return 0;
+20         }
+                                                   C/C++
+
+                                                  Fortran
+           Example A.6.1f
+
+21               PROGRAM EXAMPLE
+22                 INCLUDE "omp_lib.h"      ! or USE OMP_LIB
+23                 CALL OMP_SET_DYNAMIC(.FALSE.)
+24         !$OMP     PARALLEL NUM_THREADS(10)
+25                     ! do work here
+26         !$OMP     END PARALLEL
+27               END PROGRAM EXAMPLE
+
+                                                  Fortran
+
+
+
+
+                                                                 Appendix A      Examples       173
+1                 The call to the omp_set_dynamic routine with a non-zero argument in C/C++,
+2                 or .TRUE. in Fortran, allows the OpenMP implementation to choose any number of
+3                 threads between 1 and 10 (see also Algorithm 2.1 in Section 2.4.1 on page 36).
+
+
+                                                        C/C++
+                  Example A.6.2c
+
+ 4                #include <omp.h>
+ 5                int main()
+ 6                {
+ 7                  omp_set_dynamic(1);
+ 8                  #pragma omp parallel num_threads(10)
+ 9                  {
+10                    /* do work here */
+11                  }
+12                  return 0;
+13                }
+                                                       C/C++
+
+                                                       Fortran
+                  Example A.6.2f
+
+14                      PROGRAM EXAMPLE
+15                        INCLUDE "omp_lib.h"      ! or USE OMP_LIB
+16                        CALL OMP_SET_DYNAMIC(.TRUE.)
+17                !$OMP     PARALLEL NUM_THREADS(10)
+18                            ! do work here
+19                !$OMP     END PARALLEL
+20                      END PROGRAM EXAMPLE
+
+                                                       Fortran
+21                It is good practice to set the dyn-var ICV explicitly by calling the omp_set_dynamic
+22                routine, as its default setting is implementation defined.
+
+
+
+
+     174   OpenMP API • DRAFT Version 3.1.2011-0130
+                                                Fortran
+
+
+
+1   A.7   Fortran Restrictions on the do Construct
+2         If an end do directive follows a do-construct in which several DO statements share a
+3         DO termination statement, then a do directive can only be specified for the first (i.e.
+4         outermost) of these DO statements. For more information, see Section 2.5.1 on page 38.
+5         The following example contains correct usages of loop constructs:
+
+
+
+
+                                                              Appendix A      Examples       175
+                  Example A.7.1f
+
+1                         SUBROUTINE WORK(I, J)
+2                         INTEGER I,J
+3                         END SUBROUTINE WORK
+
+4                         SUBROUTINE DO_GOOD()
+5                           INTEGER I, J
+6                           REAL A(1000)
+
+ 7                         DO 100 I = 1,10
+ 8                !$OMP      DO
+ 9                           DO 100 J = 1,10
+10                              CALL WORK(I,J)
+11                100      CONTINUE       ! !$OMP ENDDO implied here
+
+12                !$OMP    DO
+13                         DO 200 J = 1,10
+14                200         A(I) = I + 1
+15                !$OMP    ENDDO
+
+16                !$OMP   DO
+17                        DO 300 I = 1,10
+18                           DO 300 J = 1,10
+19                             CALL WORK(I,J)
+20                300     CONTINUE
+21                !$OMP   ENDDO
+22                      END SUBROUTINE DO_GOOD
+
+
+23                The following example is non-conforming because the matching do directive for the
+24                end do does not precede the outermost loop:
+
+                  Example A.7.2f
+
+25                        SUBROUTINE WORK(I, J)
+26                        INTEGER I,J
+27                        END SUBROUTINE WORK
+
+28                        SUBROUTINE DO_WRONG
+29                          INTEGER I, J
+
+30                        DO 100 I = 1,10
+31                !$OMP     DO
+32                          DO 100 J = 1,10
+33                             CALL WORK(I,J)
+34                100     CONTINUE
+35                !$OMP   ENDDO
+36                      END SUBROUTINE DO_WRONG
+
+                                                       Fortran
+
+
+     176   OpenMP API • DRAFT Version 3.1.2011-0130
+                                                  Fortran
+
+
+
+1    A.8   Fortran Private Loop Iteration Variables
+2          In general loop iteration variables will be private, when used in the do-loop of a do and
+3          parallel do construct or in sequential loops in a parallel construct (see
+4          Section 2.5.1 on page 38 and Section 2.9.1 on page 83). In the following example of a
+5          sequential loop in a parallel construct the loop iteration variable I will be private.
+
+           Example A.8.1f
+
+6          SUBROUTINE PLOOP_1(A,N)
+7          INCLUDE "omp_lib.h"          ! or USE OMP_LIB
+
+8          REAL A(*)
+9          INTEGER I, MYOFFSET, N
+
+10         !$OMP PARALLEL PRIVATE(MYOFFSET)
+11                MYOFFSET = OMP_GET_THREAD_NUM()*N
+12                DO I = 1, N
+13                  A(MYOFFSET+I) = FLOAT(I)
+14                ENDDO
+15         !$OMP END PARALLEL
+
+16         END SUBROUTINE PLOOP_1
+
+
+
+
+                                                                Appendix A       Examples       177
+1                 In exceptional cases, loop iteration variables can be made shared, as in the following
+2                 example:
+
+                  Example A.8.2f
+
+3                 SUBROUTINE PLOOP_2(A,B,N,I1,I2)
+4                 REAL A(*), B(*)
+5                 INTEGER I1, I2, N
+
+ 6                !$OMP PARALLEL SHARED(A,B,I1,I2)
+ 7                !$OMP SECTIONS
+ 8                !$OMP SECTION
+ 9                     DO I1 = I1, N
+10                       IF (A(I1).NE.0.0) EXIT
+11                     ENDDO
+12                !$OMP SECTION
+13                     DO I2 = I2, N
+14                       IF (B(I2).NE.0.0) EXIT
+15                     ENDDO
+16                !$OMP END SECTIONS
+17                !$OMP SINGLE
+18                    IF (I1.LE.N) PRINT *, 'ITEMS IN A UP TO ', I1, 'ARE ALL ZERO.'
+19                    IF (I2.LE.N) PRINT *, 'ITEMS IN B UP TO ', I2, 'ARE ALL ZERO.'
+20                !$OMP END SINGLE
+21                !$OMP END PARALLEL
+
+22                END SUBROUTINE PLOOP_2
+
+23                Note however that the use of shared loop iteration variables can easily lead to race
+24                conditions.
+                                                         Fortran
+
+
+
+
+25   A.9          The nowait clause
+26                If there are multiple independent loops within a parallel region, you can use the
+27                nowait clause (see Section 2.5.1 on page 38) to avoid the implied barrier at the end of
+28                the loop construct, as follows:
+
+
+
+
+     178   OpenMP API • DRAFT Version 3.1.2011-0130
+                                           C/C++
+     Example A.9.1c
+
+1    #include <math.h>
+
+ 2   void nowait_example(int n, int m, float *a, float *b, float *y, float *z)
+ 3   {
+ 4     int i;
+ 5     #pragma omp parallel
+ 6     {
+ 7       #pragma omp for nowait
+ 8         for (i=1; i<n; i++)
+ 9            b[i] = (a[i] + a[i-1]) / 2.0;
+10
+11           #pragma omp for nowait
+12             for (i=0; i<m; i++)
+13               y[i] = sqrt(z[i]);
+14       }
+15   }
+                                           C/C++
+
+                                          Fortran
+     Example A.9.1f
+
+16               SUBROUTINE NOWAIT_EXAMPLE(N, M, A, B, Y, Z)
+
+17               INTEGER N, M
+18               REAL A(*), B(*), Y(*), Z(*)
+
+19               INTEGER I
+
+20   !$OMP PARALLEL
+
+21   !$OMP DO
+22           DO I=2,N
+23             B(I) = (A(I) + A(I-1)) / 2.0
+24           ENDDO
+25   !$OMP END DO NOWAIT
+
+26   !$OMP DO
+27           DO I=1,M
+28             Y(I) = SQRT(Z(I))
+29           ENDDO
+30   !$OMP END DO NOWAIT
+
+31   !$OMP END PARALLEL
+
+32               END SUBROUTINE NOWAIT_EXAMPLE
+
+                                          Fortran
+
+                                                      Appendix A   Examples   179
+1                 In the following example, static scheduling distributes the same logical iteration
+2                 numbers to the threads that execute the three loop regions. This allows the nowait
+3                 clause to be used, even though there is a data dependence between the loops. The
+4                 dependence is satisfied as long the same thread executes the same logical iteration
+5                 numbers in each loop.
+6                 Note that the iteration count of the loops must be the same. The example satisfies this
+7                 requirement, since the iteration space of the first two loops is from 0 to n-1 (from 1 to
+8                 N in the Fortran version), while the iteration space of the last loop is from 1 to n (2 to
+9                 N+1 in the Fortran version).
+                                                          C/C++
+                  Example A.9.2c
+10                #include <math.h>
+11                void nowait_example2(int n, float *a, float *b, float *c, float *y, float *z)
+12                {
+13                   int i;
+14                #pragma omp parallel
+15                   {
+16                #pragma omp for schedule(static) nowait
+17                   for (i=0; i<n; i++)
+18                      c[i] = (a[i] + b[i]) / 2.0f;
+19                #pragma omp for schedule(static) nowait
+20                   for (i=0; i<n; i++)
+21                      z[i] = sqrtf(c[i]);
+22                #pragma omp for schedule(static) nowait
+23                   for (i=1; i<=n; i++)
+24                      y[i] = z[i-1] + a[i];
+25                   }
+26                }
+                                                          C/C++
+                                                          Fortran
+                  Example A.9.2f
+27
+28                   SUBROUTINE NOWAIT_EXAMPLE2(N, A, B, C, Y, Z)
+29                   INTEGER N
+30                   REAL A(*), B(*), C(*), Y(*), Z(*)
+31                   INTEGER I
+32                !$OMP PARALLEL
+33                !$OMP DO SCHEDULE(STATIC)
+34                   DO I=1,N
+35                      C(I) = (A(I) + B(I)) / 2.0
+36                   ENDDO
+37                !$OMP END DO NOWAIT
+38                !$OMP DO SCHEDULE(STATIC)
+39                   DO I=1,N
+40                      Z(I) = SQRT(C(I))
+41                   ENDDO
+42                !$OMP END DO NOWAIT
+
+
+
+     180   OpenMP API • DRAFT Version 3.1.2011-0130
+1           !$OMP DO SCHEDULE(STATIC)
+2              DO I=2,N+1
+3                 Y(I) = Z(I-1) + A(I)
+4              ENDDO
+5           !$OMP END DO NOWAIT
+6           !$OMP END PARALLEL
+7              END SUBROUTINE NOWAIT_EXAMPLE2
+
+                                                   Fortran
+
+
+
+
+8    A.10   The collapse clause
+ 9          For the following three examples, see Section 2.5.1 on page 38 for a description of the
+10          collapse clause, Section 2.8.7 on page 81 for a description of the ordered
+11          construct, and Section 2.9.3.5 on page 99 for a description of the lastprivate
+12          clause.
+13          In the following example, the k and j loops are associated with the loop construct. So
+14          the iterations of the k and j loops are collapsed into one loop with a larger iteration
+15          space, and that loop is then divided among the threads in the current team. Since the i
+16          loop is not associated with the loop construct, it is not collapsed, and the i loop is
+17          executed sequentially in its entirety in every iteration of the collapsed k and j loop.
+
+
+                                                   C/C++
+            Example A.10.1c
+
+18          #include <omp.h>
+19          int a, kl, ku, ks, jl, ju, js, il, iu, is;
+20          void sub(int ku, int ju, int iu, float *a)
+21          {
+22              int i, j, k;
+23              #pragma omp for collapse(2) private(i, k, j)
+24              for (k=kl; k<=ku; k+=ks)
+25                 for (j=jl; j<=ju; j+=js)
+26                    for (i=il; i<=iu; i+=is)
+27                       bar(a,i,j,k);
+28          }
+                                                   C/C++
+
+                                                   Fortran
+            Example A.10.1f
+
+29                 subroutine sub()
+30          !$omp do collapse(2) private(i,j,k)
+
+
+
+                                                                 Appendix A      Examples      181
+1                        do k = kl, ku, ks
+2                          do j = jl, ju, js
+3                             do i = il, iu, is
+4                               call bar(a,i,j,k)
+5                           enddo
+6                         enddo
+7                       enddo
+8                 !$omp end do
+9                       end subroutine
+
+                                                          Fortran
+10                In the next example, the k and j loops are associated with the loop construct. So the
+11                iterations of the k and j loops are collapsed into one loop with a larger iteration space,
+12                and that loop is then divided among the threads in the current team.
+13                The sequential execution of the iterations in the k and j loops determines the order of
+14                the iterations in the collapsed iteration space. This implies that in the sequentially last
+15                iteration of the collapsed iteration space, k will have the value 2 and j will have the
+16                value 3. Since klast and jlast are lastprivate, their values are assigned by the
+17                sequentially last iteration of the collapsed k and j loop. This example prints: 2 3.
+
+
+                                                           C/C++
+                  Example A.10.2c
+
+18                #include <omp.h>
+19                #include <stdio.h>
+20                void test()
+21                {
+22                   int j, k, jlast, klast;
+23                   #pragma omp parallel
+24                   {
+25                      #pragma omp for collapse(2) lastprivate(jlast, klast)
+26                      for (k=1; k<=2; k++)
+27                         for (j=1; j<=3; j++)
+28                         {
+29                            jlast=j;
+30                            klast=k;
+31                         }
+32                      #pragma omp single
+33                      printf("%d %d\n", klast, jlast);
+34                   }
+35                }
+
+
+
+
+     182   OpenMP API • DRAFT Version 3.1.2011-0130
+                                             Fortran
+     Example A.10.2f
+
+ 1         program test
+ 2   !$omp parallel
+ 3   !$omp do private(j,k) collapse(2) lastprivate(jlast, klast)
+ 4         do k = 1,2
+ 5           do j = 1,3
+ 6             jlast=j
+ 7             klast=k
+ 8           enddo
+ 9         enddo
+10   !$omp end do
+11   !$omp single
+12                    print *, klast, jlast
+13   !$omp end single
+14   !$omp end parallel
+15         end program test
+
+                                             Fortran
+16   The next example illustrates the interaction of the collapse and ordered clauses.
+17   In the example, the loop construct has both a collapse clause and an ordered
+18   clause. The collapse clause causes the iterations of the k and j loops to be collapsed
+19   into one loop with a larger iteration space, and that loop is divided among the threads in
+20   the current team. An ordered clause is added to the loop construct, because an
+21   ordered region binds to the loop region arising from the loop construct.
+22   According to section Section 2.8.7 on page 81, a thread must not execute more than one
+23   ordered region that binds to the same loop region. So the collapse clause is required
+24   for the example to be conforming. With the collapse clause, the iterations of the k
+25   and j loops are collapsed into one loop, and therefore only one ordered region will bind
+26   to the collapsed k and j loop. Without the collapse clause, there would be two
+27   ordered regions that bind to each iteration of the k loop (one arising from the first
+28   iteration of the j loop, and the other arising from the second iteration of the j loop).
+29   The code prints
+30   0   1   1
+31   0   1   2
+32   0   2   1
+33   1   2   2
+34   1   3   1
+35   1   3   2
+
+
+
+
+                                                           Appendix A       Examples       183
+                                                      C/C++
+                  Example A.10.3c
+
+ 1                #include <omp.h>
+ 2                #include <stdio.h>
+ 3                void sub()
+ 4                {
+ 5                   int j, k, a;
+ 6                   #pragma omp parallel num_threads(2)
+ 7                   {
+ 8                      #pragma omp for collapse(2) ordered private(j,k) schedule(static,3)
+ 9                      for (k=1; k<=3; k++)
+10                         for (j=1; j<=2; j++)
+11                         {
+12                            #pragma omp ordered
+13                            printf("%d %d %d\n", omp_get_thread_num(), k, j);
+14                            /* end ordered */
+15                            work(a,j,k);
+16                         }
+17                   }
+18                }
+
+
+                                                     Fortran
+                  Example A.10.3f
+
+19                        program test
+20                        include 'omp_lib.h'
+21                !$omp   parallel num_threads(2)
+22                !$omp   do collapse(2) ordered private(j,k) schedule(static,3)
+23                        do k = 1,3
+24                          do j = 1,2
+25                !$omp   ordered
+26                            print *, omp_get_thread_num(), k, j
+27                !$omp   end ordered
+28                            call work(a,j,k)
+29                          enddo
+30                        enddo
+31                !$omp   end do
+32                !$omp   end parallel
+33                        end program test
+
+                                                     Fortran
+
+
+
+
+     184   OpenMP API • DRAFT Version 3.1.2011-0130
+1    A.11   The parallel sections Construct
+2           In the following example (for Section 2.6.2 on page 56) routines xaxis, yaxis, and zaxis
+3           can be executed concurrently. The first section directive is optional. Note that all
+4           section directives need to appear in the parallel sections construct.
+
+
+                                                   C/C++
+            Example A.11.1c
+
+5           void XAXIS();
+6           void YAXIS();
+7           void ZAXIS();
+
+ 8          void sect_example()
+ 9          {
+10            #pragma omp parallel sections
+11            {
+12              #pragma omp section
+13                XAXIS();
+
+14                  #pragma omp section
+15                    YAXIS();
+16
+17                  #pragma omp section
+18                    ZAXIS();
+19              }
+20          }
+                                                   C/C++
+
+                                                   Fortran
+            Example A.11.1f
+
+21                    SUBROUTINE SECT_EXAMPLE()
+
+22          !$OMP PARALLEL SECTIONS
+
+23          !$OMP SECTION
+24                  CALL XAXIS()
+
+25          !$OMP SECTION
+26                  CALL YAXIS()
+
+27          !$OMP SECTION
+28                  CALL ZAXIS()
+
+29          !$OMP END PARALLEL SECTIONS
+
+
+                                                                 Appendix A      Examples       185
+1                           END SUBROUTINE SECT_EXAMPLE
+
+                                                          Fortran
+
+
+
+
+2    A.12         The single Construct
+3                 The following example demonstrates the single construct (Section 2.5.3 on page 49).
+4                 In the example, only one thread prints each of the progress messages. All other threads
+5                 will skip the single region and stop at the barrier at the end of the single construct
+6                 until all threads in the team have reached the barrier. If other threads can proceed
+7                 without waiting for the thread executing the single region, a nowait clause can be
+8                 specified, as is done in the third single construct in this example. The user must not
+9                 make any assumptions as to which thread will execute a single region.
+
+
+                                                          C/C++
+                  Example A.12.1c
+
+10                #include <stdio.h>
+
+11                void work1() {}
+12                void work2() {}
+
+13                void single_example()
+14                {
+15                  #pragma omp parallel
+16                  {
+17                    #pragma omp single
+18                      printf("Beginning work1.\n");
+
+19                        work1();
+
+20                        #pragma omp single
+21                          printf("Finishing work1.\n");
+
+22                        #pragma omp single nowait
+23                          printf("Finished work1 and beginning work2.\n");
+
+24                        work2();
+25                    }
+26                }
+                                                          C/C++
+
+
+
+
+     186   OpenMP API • DRAFT Version 3.1.2011-0130
+                                                     Fortran
+            Example A.12.1f
+
+1                  SUBROUTINE WORK1()
+2                  END SUBROUTINE WORK1
+3
+4                  SUBROUTINE WORK2()
+5                  END SUBROUTINE WORK2
+6
+7                 PROGRAM SINGLE_EXAMPLE
+8           !$OMP PARALLEL
+
+ 9          !$OMP SINGLE
+10                  print *, "Beginning work1."
+11          !$OMP END SINGLE
+
+12                   CALL WORK1()
+
+13          !$OMP SINGLE
+14                  print *, "Finishing work1."
+15          !$OMP END SINGLE
+
+16          !$OMP SINGLE
+17                  print *, "Finished work1 and beginning work2."
+18          !$OMP END SINGLE NOWAIT
+
+19                   CALL WORK2()
+
+20          !$OMP END PARALLEL
+
+21                 END PROGRAM SINGLE_EXAMPLE
+
+                                                     Fortran
+
+
+22   A.13   Tasking Constructs
+23          The following example shows how to traverse a tree-like structure using explicit tasks
+24          (see Section 2.7 on page 59). Note that the traverse function should be called from
+25          within a parallel region for the different specified tasks to be executed in parallel. Also,
+26          note that the tasks will be executed in no specified order because there are no
+27          synchronization directives. Thus, assuming that the traversal will be done in post order,
+28          as in the sequential code, is wrong.
+
+
+
+
+                                                                   Appendix A       Examples        187
+                                                     C/C++
+                  Example A.13.1c
+
+ 1                struct node {
+ 2                   struct node *left;
+ 3                   struct node *right;
+ 4                };
+ 5                extern void process(struct node *);
+ 6                void traverse( struct node *p ) {
+ 7                   if (p->left)
+ 8                #pragma omp task    // p is firstprivate by default
+ 9                       traverse(p->left);
+10                   if (p->right)
+11                #pragma omp task      // p is firstprivate by default
+12                       traverse(p->right);
+13                   process(p);
+14                }
+                                                     C/C++
+
+                                                     Fortran
+                  Example A.13.1f
+
+15                       RECURSIVE SUBROUTINE traverse ( P )
+16                          TYPE Node
+17                            TYPE(Node), POINTER :: left, right
+18                          END TYPE Node
+19                          TYPE(Node) :: P
+20                          IF (associated(P%left)) THEN
+21                                  !$OMP TASK     ! P is firstprivate by default
+22                                       call traverse(P%left)
+23                                  !$OMP END TASK
+24                          ENDIF
+25                          IF (associated(P%right)) THEN
+26                                  !$OMP TASK      ! P is firstprivate by default
+27                                       call traverse(P%right)
+28                                  !$OMP END TASK
+29                          ENDIF
+30                          CALL process ( P )
+31                        END SUBROUTINE
+
+                                                     Fortran
+
+
+
+
+     188   OpenMP API • DRAFT Version 3.1.2011-0130
+1    In the next example, we force a postorder traversal of the tree by adding a taskwait
+2    directive (See Section 2.8.4 on page 70). Now, we can safely assume that the left and
+3    right sons have been executed before we process the current node.
+
+
+                                           C/C++
+     Example A.13.2c
+
+ 4   struct node {
+ 5      struct node *left;
+ 6      struct node *right;
+ 7   };
+ 8   extern void process(struct node *);
+ 9   void postorder_traverse( struct node *p ) {
+10        if (p->left)
+11           #pragma omp task    // p is firstprivate by default
+12               postorder_traverse(p->left);
+13        if (p->right)
+14           #pragma omp task   // p is firstprivate by default
+15               postorder_traverse(p->right);
+16        #pragma omp taskwait
+17        process(p);
+18   }
+                                           C/C++
+
+                                           Fortran
+     Example A.13.2f
+
+19             RECURSIVE SUBROUTINE traverse ( P )
+20                TYPE Node
+21                    TYPE(Node), POINTER :: left, right
+22                 END TYPE Node
+23                 TYPE(Node) :: P
+24                 IF (associated(P%left)) THEN
+25                       !$OMP TASK   ! P is firstprivate by default
+26                           call traverse(P%left)
+27                       !$OMP END TASK
+28                 ENDIF
+29                 IF (associated(P%right)) THEN
+30                       !$OMP TASK     ! P is firstprivate by default
+31                           call traverse(P%right)
+32                       !$OMP END TASK
+33                 ENDIF
+34                 !$OMP TASKWAIT
+35                 CALL process ( P )
+36              END SUBROUTINE
+
+                                           Fortran
+
+
+
+                                                        Appendix A      Examples      189
+1                 The following example demonstrates how to use the task construct to process elements
+2                 of a linked list in parallel. The thread executing the single region generates all of the
+3                 explicit tasks, which are then executed by the threads in the current team. The pointer p
+4                 is firstprivate by default on the task construct so it is not necessary to specify it
+5                 in a firstprivate clause (see page 85).
+
+
+                                                          C/C++
+                  Example A.13.3c
+
+ 6                typedef struct node node;
+ 7                struct node {
+ 8                      int data;
+ 9                      node * next;
+10                };
+11
+12                void process(node * p)
+13                {
+14                    /* do work here */
+15                }
+16                void increment_list_items(node * head)
+17                {
+18                    #pragma omp parallel
+19                    {
+20                        #pragma omp single
+21                            {
+22                               node * p = head;
+23                               while (p) {
+24                                    #pragma omp task
+25                                     // p is firstprivate by default
+26                                           process(p);
+27                                     p = p->next;
+28                                  }
+29                            }
+30                      }
+31                }
+                                                          C/C++
+
+
+
+
+     190   OpenMP API • DRAFT Version 3.1.2011-0130
+                                      Fortran
+     Example A.13.3f
+
+ 1        MODULE LIST
+ 2           TYPE NODE
+ 3               INTEGER :: PAYLOAD
+ 4               TYPE (NODE), POINTER :: NEXT
+ 5           END TYPE NODE
+ 6        CONTAINS
+ 7            SUBROUTINE PROCESS(p)
+ 8               TYPE (NODE), POINTER :: P
+ 9                    ! do work here
+10            END SUBROUTINE
+11            SUBROUTINE INCREMENT_LIST_ITEMS (HEAD)
+12                 TYPE (NODE), POINTER :: HEAD
+13                 TYPE (NODE), POINTER :: P
+14                 !$OMP PARALLEL PRIVATE(P)
+15                    !$OMP SINGLE
+16                         P => HEAD
+17                         DO
+18                            !$OMP TASK
+19                                 ! P is firstprivate by default
+20                                 CALL PROCESS(P)
+21                            !$OMP END TASK
+22                            P => P%NEXT
+23                            IF ( .NOT. ASSOCIATED (P) ) EXIT
+24                         END DO
+25                   !$OMP END SINGLE
+26               !$OMP END PARALLEL
+27            END SUBROUTINE
+28         END MODULE
+
+                                      Fortran
+
+
+
+
+                                                   Appendix A       Examples   191
+1                 The fib() function should be called from within a parallel region for the different
+2                 specified tasks to be executed in parallel. Also, only one thread of the parallel region
+3                 should call fib() unless multiple concurrent Fibonacci computations are desired.
+
+
+                                                          C/C++
+                  Example A.13.4c
+
+ 4                        int fib(int n) {
+ 5                           int i, j;
+ 6                           if (n<2)
+ 7                             return n;
+ 8                           else {
+ 9                              #pragma omp task shared(i)
+10                                  i=fib(n-1);
+11                              #pragma omp task shared(j)
+12                                  j=fib(n-2);
+13                              #pragma omp taskwait
+14                                  return i+j;
+15                           }
+16                        }
+                                                          C/C++
+
+                                                          Fortran
+                  Example A.13.4f
+
+17                         RECURSIVE INTEGER FUNCTION fib(n) RESULT(res)
+18                         INTEGER n, i, j
+19                         IF ( n .LT. 2) THEN
+20                           res = n
+21                         ELSE
+22                !$OMP    TASK SHARED(i)
+23                           i = fib( n-1 )
+24                !$OMP    END TASK
+25                !$OMP    TASK SHARED(j)
+26                           j = fib( n-2 )
+27                !$OMP    END TASK
+28                !$OMP    TASKWAIT
+29                           res = i+j
+30                         END IF
+31                         END FUNCTION
+
+                                                          Fortran
+32                Note: There are more efficient algorithms for computing Fibonacci numbers. This
+33                classic recursion algorithm is for illustrative purposes.
+
+
+
+
+     192   OpenMP API • DRAFT Version 3.1.2011-0130
+1    The following example demonstrates a way to generate a large number of tasks with one
+2    thread and execute them with the threads in the parallel team (see Section 2.7.3 on page
+3    63). While generating these tasks, the implementation may reach its limit on unassigned
+4    tasks. If it does, the implementation is allowed to cause the thread executing the task
+5    generating loop to suspend its task at the task scheduling point in the task directive,
+6    and start executing unassigned tasks. Once the number of unassigned tasks is
+7    sufficiently low, the thread may resume execution of the task generating loop.
+
+
+                                            C/C++
+     Example A.13.5c
+
+ 8   #define LARGE_NUMBER 10000000
+ 9   double item[LARGE_NUMBER];
+10   extern void process(double);
+11
+12   int main() {
+13   #pragma omp parallel
+14     {
+15       #pragma omp single
+16       {
+17         int i;
+18         for (i=0; i<LARGE_NUMBER; i++)
+19                #pragma omp task    // i is firstprivate, item is shared
+20                     process(item[i]);
+21       }
+22     }
+23   }
+                                            C/C++
+
+                                            Fortran
+24   Example A.13.5f
+
+25           real*8 item(10000000)
+26           integer i
+27
+28   !$omp parallel
+29   !$omp single ! loop iteration variable i is private
+30          do i=1,10000000
+31   !$omp task
+32            ! i is firstprivate, item is shared
+33              call process(item(i))
+34   !$omp end task
+35          end do
+36   !$omp end single
+37   !$omp end parallel
+38          end
+
+                                            Fortran
+
+
+                                                          Appendix A      Examples       193
+1                 The following example is the same as the previous one, except that the tasks are
+2                 generated in an untied task (see Section 2.7 on page 59). While generating the tasks, the
+3                 implementation may reach its limit on unassigned tasks. If it does, the implementation is
+4                 allowed to cause the thread executing the task generating loop to suspend its task at the
+5                 task scheduling point in the task directive, and start executing unassigned tasks. If
+6                 that thread begins execution of a task that takes a long time to complete, the other
+7                 threads may complete all the other tasks before it is finished.
+ 8                In this case, since the loop is in an untied task, any other thread is eligible to resume the
+ 9                task generating loop. In the previous examples, the other threads would be forced to
+10                wait idly until the generating thread finishes its long task, since the task generating loop
+11                was in a tied task.
+
+
+                                                            C/C++
+                  Example A.13.6c
+
+12                #define LARGE_NUMBER 10000000
+13                double item[LARGE_NUMBER];
+14                extern void process(double);
+15                int main() {
+16                #pragma omp parallel
+17                  {
+18                    #pragma omp single
+19                    {
+20                      int i;
+21                      #pragma omp task untied
+22                      // i is firstprivate, item is shared
+23                      {
+24                         for (i=0; i<LARGE_NUMBER; i++)
+25                             #pragma omp task
+26                                  process(item[i]);
+27                      }
+28                    }
+29                  }
+30                }
+                                                           C/C++
+
+
+
+
+     194   OpenMP API • DRAFT Version 3.1.2011-0130
+                                            Fortran
+     Example A.13.6f
+
+ 1          real*8 item(10000000)
+ 2   !$omp parallel
+ 3   !$omp single
+ 4   !$omp task untied
+ 5          ! loop iteration variable i is private
+ 6          do i=1,10000000
+ 7   !$omp task ! i is firstprivate, item is shared
+ 8              call process(item(i))
+ 9   !$omp end task
+10          end do
+11   !$omp end task
+12   !$omp end single
+13   !$omp end parallel
+14          end
+
+                                            Fortran
+15   The following two examples demonstrate how the scheduling rules illustrated in
+16   Section 2.7.3 on page 63 affect the usage of threadprivate variables in tasks. A
+17   threadprivate variable can be modified by another task that is executed by the
+18   same thread. Thus, the value of a threadprivate variable cannot be assumed to be
+19   unchanged across a task scheduling point. In untied tasks, task scheduling points may be
+20   added in any place by the implementation.
+21   A task switch may occur at a task scheduling point. A single thread may execute both of
+22   the task regions that modify tp. The parts of these task regions in which tp is modified
+23   may be executed in any order so the resulting value of var can be either 1 or 2.
+
+
+
+
+                                                          Appendix A      Examples       195
+                                                      C/C++
+                  Example A.13.7c
+ 1                int tp;
+ 2                #pragma omp threadprivate(tp)
+ 3                int var;
+ 4                void work()
+ 5                {
+ 6                #pragma omp task
+ 7                    {
+ 8                        /* do work here */
+ 9                #pragma omp task
+10                        {
+11                            tp = 1;
+12                            /* do work here */
+13                #pragma omp task
+14                            {
+15                                 /* no modification of tp */
+16                            }
+17                            var = tp; //value of tp can be 1 or 2
+18                        }
+19                        tp = 2;
+20                    }
+21                }
+                                                      C/C++
+                                                      Fortran
+                  Example A.13.7f
+22                        module example
+23                        integer tp
+24                !$omp   threadprivate(tp)
+25                        integer var
+26                        contains
+27                        subroutine work
+28                        use globals
+29                !$omp   task
+30                           ! do work here
+31                !$omp   task
+32                           tp = 1
+33                           ! do work here
+34                !$omp   task
+35                             ! no modification of tp
+36                !$omp   end task
+37                           var = tp     ! value of var can be 1 or 2
+38                !$omp   end task
+39                          tp = 2
+40                !$omp   end task
+41                        end subroutine
+42                        end module
+
+                                                      Fortran
+
+
+
+     196   OpenMP API • DRAFT Version 3.1.2011-0130
+1    In this example, scheduling constraints (see Section 2.7.3 on page 63) prohibit a thread
+2    in the team from executing a new task that modifies tp while another such task region
+3    tied to the same thread is suspended. Therefore, the value written will persist across the
+4    task scheduling point.
+                                             C/C++
+     Example A.13.8c
+ 5   #include <omp.h>
+ 6   int tp;
+ 7   #pragma omp threadprivate(tp)
+ 8   int var;
+ 9   void work()
+10   {
+11   #pragma omp parallel
+12       {
+13            /* do work here */
+14   #pragma omp task
+15            {
+16                tp++;
+17                /* do work here */
+18   #pragma omp task
+19                {
+20                    /* do work here but don't modify tp */
+21                }
+22                var = tp; //Value does not change after write above
+23            }
+24       }
+25   }
+                                             C/C++
+                                             Fortran
+     Example A.13.8f
+26           module example
+27           integer tp
+28   !$omp   threadprivate(tp)
+29           integer var
+30           contains
+31           subroutine work
+32   !$omp   parallel
+33              ! do work here
+34   !$omp   task
+35              tp = tp + 1
+36              ! do work here
+37   !$omp   task
+38                ! do work here but don't modify tp
+39   !$omp   end task
+40              var = tp     ! value does not change after write above
+41   !$omp   end task
+42   !$omp   end parallel
+43           end subroutine
+
+
+
+
+                                                           Appendix A       Examples       197
+1                        end module
+
+                                                           Fortran
+2                 The following two examples demonstrate how the scheduling rules illustrated in
+3                 Section 2.7.3 on page 63 affect the usage of locks and critical sections in tasks. If a lock
+4                 is held across a task scheduling point, no attempt should be made to acquire the same
+5                 lock in any code that may be interleaved. Otherwise, a deadlock is possible.
+6                 In the example below, suppose the thread executing task 1 defers task 2. When it
+7                 encounters the task scheduling point at task 3, it could suspend task 1 and begin task 2
+8                 which will result in a deadlock when it tries to enter critical region 1.
+
+
+                                                           C/C++
+                  Example A.13.9c
+
+ 9                void work()
+10                {
+11                   #pragma omp task
+12                   { //Task 1
+13                       #pragma omp task
+14                       { //Task 2
+15                             #pragma omp critical //Critical region 1
+16                             {/*do work here */ }
+17                       }
+18                       #pragma omp critical //Critical Region 2
+19                       {
+20                            //Capture data for the following task
+21                            #pragma omp task
+22                            { /* do work here */ } //Task 3
+23                       }
+24                   }
+25                }
+                                                           C/C++
+
+
+
+
+     198   OpenMP API • DRAFT Version 3.1.2011-0130
+                                        Fortran
+1    Example A.13.9f
+
+ 2            module example
+ 3            contains
+ 4            subroutine work
+ 5   !$omp   task
+ 6            ! Task 1
+ 7   !$omp   task
+ 8            ! Task 2
+ 9   !$omp   critical
+10            ! Critical region 1
+11            ! do work here
+12   !$omp   end critical
+13   !$omp   end task
+14   !$omp   critical
+15            ! Critical region 2
+16            ! Capture data for the following task
+17   !$omp   task
+18            !Task 3
+19            ! do work here
+20   !$omp   end task
+21   !$omp   end critical
+22   !$omp   end task
+23           end subroutine
+24           end module
+
+                                        Fortran
+
+
+
+
+                                                      Appendix A   Examples   199
+1                 In the following example, lock is held across a task scheduling point. However,
+2                 according to the scheduling restrictions outlined in Section 2.7.3 on page 63, the
+3                 executing thread can't begin executing one of the non-descendant tasks that also acquires
+4                 lock before the task region is complete. Therefore, no deadlock is possible.
+
+
+                                                          C/C++
+                  Example A.13.10c
+
+ 5                #include <omp.h>
+ 6                void work() {
+ 7                    omp_lock_t lock;
+ 8                    omp_init_lock(&lock);
+ 9                #pragma omp parallel
+10                    {
+11                        int i;
+12                #pragma omp for
+13                        for (i = 0; i < 100; i++) {
+14                #pragma omp task
+15                            {
+16                                    // lock is shared by default in the task
+17                                    omp_set_lock(&lock);
+18                                 // Capture data for the following task
+19                #pragma omp task
+20                                    // Task Scheduling Point 1
+21                                 { /* do work here */ }
+22                                 omp_unset_lock(&lock);
+23                            }
+24                        }
+25                    }
+26                    omp_destroy_lock(&lock);
+27                }
+                                                          C/C++
+
+
+
+
+     200   OpenMP API • DRAFT Version 3.1.2011-0130
+                                                Fortran
+            Example A.13.10f
+
+ 1                 module example
+ 2                 include 'omp_lib.h'
+ 3                 integer (kind=omp_lock_kind) lock
+ 4                 integer i
+ 5                 contains
+ 6                 subroutine work
+ 7                 call omp_init_lock(lock)
+ 8          !$omp parallel
+ 9               !$omp do
+10                do i=1,100
+11                   !$omp task
+12                         ! Outer task
+13                         call omp_set_lock(lock)    ! lock is shared by
+14                                                    ! default in the task
+15                                ! Capture data for the following task
+16                                !$omp task     ! Task Scheduling Point 1
+17                                         ! do work here
+18                                !$omp end task
+19                          call omp_unset_lock(lock)
+20                   !$omp end task
+21                end do
+22          !$omp end parallel
+23                call omp_destroy_lock(lock)
+24                end subroutine
+25                end module
+
+                                                Fortran
+
+                                                Fortran
+
+
+
+26   A.14   The workshare Construct
+27          The following are examples of the workshare construct (see Section 2.5.4 on page
+28          51).
+
+
+
+
+                                                             Appendix A     Examples      201
+                                                     Fortran (cont.)
+1                 In the following example, workshare spreads work across the threads executing the
+2                 parallel region, and there is a barrier after the last statement. Implementations must
+3                 enforce Fortran execution rules inside of the workshare block.
+
+                  Example A.14.1f
+
+4                         SUBROUTINE WSHARE1(AA, BB, CC, DD, EE, FF, N)
+5                         INTEGER N
+6                         REAL AA(N,N), BB(N,N), CC(N,N), DD(N,N), EE(N,N), FF(N,N)
+
+ 7                !$OMP     PARALLEL
+ 8                !$OMP      WORKSHARE
+ 9                             AA = BB
+10                             CC = DD
+11                             EE = FF
+12                !$OMP      END WORKSHARE
+13                !$OMP    END PARALLEL
+
+14                        END SUBROUTINE WSHARE1
+
+15                In the following example, the barrier at the end of the first workshare region is
+16                eliminated with a nowait clause. Threads doing CC = DD immediately begin work on
+17                EE = FF when they are done with CC = DD.
+
+                  Example A.14.2f
+
+18                        SUBROUTINE WSHARE2(AA, BB, CC, DD, EE, FF, N)
+19                        INTEGER N
+20                        REAL AA(N,N), BB(N,N), CC(N,N)
+21                        REAL DD(N,N), EE(N,N), FF(N,N)
+
+22                !$OMP     PARALLEL
+23                !$OMP       WORKSHARE
+24                              AA = BB
+25                              CC = DD
+26                !$OMP       END WORKSHARE NOWAIT
+27                !$OMP       WORKSHARE
+28                              EE = FF
+29                !$OMP       END WORKSHARE
+30                !$OMP     END PARALLEL
+31                         END SUBROUTINE WSHARE2
+
+
+
+
+     202   OpenMP API • DRAFT Version 3.1.2011-0130
+                                       Fortran (cont.)
+1    The following example shows the use of an atomic directive inside a workshare
+2    construct. The computation of SUM(AA) is workshared, but the update to R is atomic.
+
+     Example A.14.3f
+
+3            SUBROUTINE WSHARE3(AA, BB, CC, DD, N)
+4            INTEGER N
+5            REAL AA(N,N), BB(N,N), CC(N,N), DD(N,N)
+6            REAL R
+
+ 7             R=0
+ 8   !$OMP     PARALLEL
+ 9   !$OMP       WORKSHARE
+10                 AA = BB
+11   !$OMP         ATOMIC UPDATE
+12                   R = R + SUM(AA)
+13                 CC = DD
+14   !$OMP       END WORKSHARE
+15   !$OMP     END PARALLEL
+
+16           END SUBROUTINE WSHARE3
+
+
+
+17   Fortran WHERE and FORALL statements are compound statements, made up of a control
+18   part and a statement part. When workshare is applied to one of these compound
+19   statements, both the control and the statement parts are workshared. The following
+20   example shows the use of a WHERE statement in a workshare construct.
+21   Each task gets worked on in order by the threads:
+22   AA = BB then
+23   CC = DD then
+24   EE .ne. 0 then
+25   FF = 1 / EE then
+26   GG = HH
+
+
+
+
+                                                         Appendix A    Examples      203
+                                                    Fortran (cont.)
+                  Example A.14.4f
+
+1                         SUBROUTINE WSHARE4(AA, BB, CC, DD, EE, FF, GG, HH, N)
+2                         INTEGER N
+3                         REAL AA(N,N), BB(N,N), CC(N,N)
+4                         REAL DD(N,N), EE(N,N), FF(N,N)
+5                         REAL GG(N,N), HH(N,N)
+
+ 6                !$OMP    PARALLEL
+ 7                !$OMP      WORKSHARE
+ 8                             AA = BB
+ 9                             CC = DD
+10                             WHERE (EE .ne. 0) FF = 1 / EE
+11                             GG = HH
+12                !$OMP      END WORKSHARE
+13                !$OMP    END PARALLEL
+14
+15                        END SUBROUTINE WSHARE4
+
+
+16                In the following example, an assignment to a shared scalar variable is performed by one
+17                thread in a workshare while all other threads in the team wait.
+
+                  Example A.14.5f
+
+18                        SUBROUTINE WSHARE5(AA, BB, CC, DD, N)
+19                        INTEGER N
+20                        REAL AA(N,N), BB(N,N), CC(N,N), DD(N,N)
+
+21                         INTEGER SHR
+
+22                !$OMP    PARALLEL SHARED(SHR)
+23                !$OMP      WORKSHARE
+24                             AA = BB
+25                             SHR = 1
+26                             CC = DD * SHR
+27                !$OMP      END WORKSHARE
+28                !$OMP    END PARALLEL
+29
+30                        END SUBROUTINE WSHARE5
+
+
+31                The following example contains an assignment to a private scalar variable, which is
+32                performed by one thread in a workshare while all other threads wait. It is non-
+33                conforming because the private scalar variable is undefined after the assignment
+34                statement.
+
+
+
+
+     204   OpenMP API • DRAFT Version 3.1.2011-0130
+            Example A.14.6f
+
+1                   SUBROUTINE WSHARE6_WRONG(AA, BB, CC, DD, N)
+2                   INTEGER N
+3                   REAL AA(N,N), BB(N,N), CC(N,N), DD(N,N)
+
+4                     INTEGER PRI
+
+ 5          !$OMP     PARALLEL PRIVATE(PRI)
+ 6          !$OMP       WORKSHARE
+ 7                        AA = BB
+ 8                        PRI = 1
+ 9                        CC = DD * PRI
+10          !$OMP       END WORKSHARE
+11          !$OMP     END PARALLEL
+
+12                  END SUBROUTINE WSHARE6_WRONG
+
+13          Fortran execution rules must be enforced inside a workshare construct. In the
+14          following example, the same result is produced in the following program fragment
+15          regardless of whether the code is executed sequentially or inside an OpenMP program
+16          with multiple threads:
+
+            Example A.14.7f
+
+17                  SUBROUTINE WSHARE7(AA, BB, CC, N)
+18                  INTEGER N
+19                  REAL AA(N), BB(N), CC(N)
+
+20          !$OMP     PARALLEL
+21          !$OMP       WORKSHARE
+22                        AA(1:50) = BB(11:60)
+23                        CC(11:20) = AA(1:10)
+24          !$OMP       END WORKSHARE
+25          !$OMP     END PARALLEL
+
+26                  END SUBROUTINE WSHARE7
+
+                                                  Fortran
+
+
+
+
+27   A.15   The master Construct
+28          The following example demonstrates the master construct (Section 2.8.1 on page 65). In
+29          the example, the master keeps track of how many iterations have been executed and
+30          prints out a progress report. The other threads skip the master region without waiting.
+
+
+
+
+                                                                Appendix A      Examples       205
+                                                    C/C++
+                  Example A.15.1c
+
+1                 #include <stdio.h>
+
+2                 extern float average(float,float,float);
+
+ 3                void master_example( float* x, float* xold, int n, float tol )
+ 4                {
+ 5                  int c, i, toobig;
+ 6                  float error, y;
+ 7                  c = 0;
+ 8                  #pragma omp parallel
+ 9                  {
+10                    do{
+11                      #pragma omp for private(i)
+12                      for( i = 1; i < n-1; ++i ){
+13                        xold[i] = x[i];
+14                      }
+15                      #pragma omp single
+16                      {
+17                        toobig = 0;
+18                      }
+19                      #pragma omp for private(i,y,error) reduction(+:toobig)
+20                      for( i = 1; i < n-1; ++i ){
+21                        y = x[i];
+22                        x[i] = average( xold[i-1], x[i], xold[i+1] );
+23                        error = y - x[i];
+24                        if( error > tol || error < -tol ) ++toobig;
+25                      }
+26                      #pragma omp master
+27                      {
+28                        ++c;
+29                        printf( "iteration %d, toobig=%d\n", c, toobig );
+30                      }
+31                    }while( toobig > 0 );
+32                  }
+33                }
+                                                    C/C++
+
+
+
+
+     206   OpenMP API • DRAFT Version 3.1.2011-0130
+                                                  Fortran
+            Example A.15.1f
+
+ 1                  SUBROUTINE MASTER_EXAMPLE( X, XOLD, N, TOL )
+ 2                  REAL X(*), XOLD(*), TOL
+ 3                  INTEGER N
+ 4                  INTEGER C, I, TOOBIG
+ 5                  REAL ERROR, Y, AVERAGE
+ 6                  EXTERNAL AVERAGE
+ 7                  C = 0
+ 8                  TOOBIG = 1
+ 9          !$OMP   PARALLEL
+10                    DO WHILE( TOOBIG > 0 )
+11          !$OMP       DO PRIVATE(I)
+12                        DO I = 2, N-1
+13                           XOLD(I) = X(I)
+14                        ENDDO
+15          !$OMP       SINGLE
+16                        TOOBIG = 0
+17          !$OMP       END SINGLE
+18          !$OMP       DO PRIVATE(I,Y,ERROR), REDUCTION(+:TOOBIG)
+19                        DO I = 2, N-1
+20                           Y = X(I)
+21                           X(I) = AVERAGE( XOLD(I-1), X(I), XOLD(I+1) )
+22                           ERROR = Y-X(I)
+23                           IF( ERROR > TOL .OR. ERROR < -TOL ) TOOBIG = TOOBIG+1
+24                        ENDDO
+25          !$OMP       MASTER
+26                        C = C + 1
+27                        PRINT *, 'Iteration ', C, 'TOOBIG=', TOOBIG
+28          !$OMP       END MASTER
+29                    ENDDO
+30          !$OMP   END PARALLEL
+31                  END SUBROUTINE MASTER_EXAMPLE
+
+                                                  Fortran
+
+
+
+
+32   A.16   The critical Construct
+33          The following example includes several critical constructs (Section 2.8.2 on page
+34          67). The example illustrates a queuing model in which a task is dequeued and worked
+35          on. To guard against multiple threads dequeuing the same task, the dequeuing operation
+36          must be in a critical region. Because the two queues in this example are
+37          independent, they are protected by critical constructs with different names, xaxis
+38          and yaxis.
+
+
+
+
+                                                                Appendix A      Examples      207
+                                                         C/C++
+                  Example A.16.1c
+
+1                 int dequeue(float *a);
+2                 void work(int i, float *a);
+
+3                 void critical_example(float *x, float *y)
+4                 {
+5                   int ix_next, iy_next;
+
+ 6                    #pragma omp parallel shared(x, y) private(ix_next, iy_next)
+ 7                    {
+ 8                      #pragma omp critical (xaxis)
+ 9                        ix_next = dequeue(x);
+10                      work(ix_next, x);
+
+11                        #pragma omp critical (yaxis)
+12                          iy_next = dequeue(y);
+13                        work(iy_next, y);
+14                    }
+
+15                }
+                                                         C/C++
+
+                                                         Fortran
+                  Example A.16.1f
+
+16                          SUBROUTINE CRITICAL_EXAMPLE(X, Y)
+
+17                           REAL X(*), Y(*)
+18                           INTEGER IX_NEXT, IY_NEXT
+
+19                !$OMP PARALLEL SHARED(X, Y) PRIVATE(IX_NEXT, IY_NEXT)
+
+20                !$OMP CRITICAL(XAXIS)
+21                        CALL DEQUEUE(IX_NEXT, X)
+22                !$OMP END CRITICAL(XAXIS)
+23                        CALL WORK(IX_NEXT, X)
+
+24                !$OMP CRITICAL(YAXIS)
+25                        CALL DEQUEUE(IY_NEXT,Y)
+26                !$OMP END CRITICAL(YAXIS)
+27                        CALL WORK(IY_NEXT, Y)
+
+28                !$OMP END PARALLEL
+
+29                          END SUBROUTINE CRITICAL_EXAMPLE
+
+                                                         Fortran
+
+
+     208   OpenMP API • DRAFT Version 3.1.2011-0130
+1    A.17   worksharing Constructs Inside a
+2           critical Construct
+ 3          The following example demonstrates using a worksharing construct inside a critical
+ 4          construct (see Section 2.8.2 on page 67). This example is conforming because the
+ 5          worksharing single region is not closely nested inside the critical region (see
+ 6          Section 2.10 on page 109). A single thread executes the one and only section in the
+ 7          sections region, and executes the critical region. The same thread encounters the nested
+ 8          parallel region, creates a new team of threads, and becomes the master of the new team.
+ 9          One of the threads in the new team enters the single region and increments i by 1. At
+10          the end of this example i is equal to 2.
+
+
+                                                   C/C++
+            Example A.17.1c
+
+11          void critical_work()
+12          {
+13            int i = 1;
+14            #pragma omp parallel sections
+15            {
+16              #pragma omp section
+17              {
+18                #pragma omp critical (name)
+19                {
+20                  #pragma omp parallel
+21                  {
+22                    #pragma omp single
+23                    {
+24                       i++;
+25                    }
+26                  }
+27                }
+28              }
+29            }
+30          }
+                                                   C/C++
+
+
+
+
+                                                                 Appendix A      Examples       209
+                                                        Fortran
+                  Example A.17.1f
+
+1                         SUBROUTINE CRITICAL_WORK()
+
+2                          INTEGER I
+3                          I = 1
+
+ 4                !$OMP     PARALLEL SECTIONS
+ 5                !$OMP       SECTION
+ 6                !$OMP         CRITICAL (NAME)
+ 7                !$OMP           PARALLEL
+ 8                !$OMP             SINGLE
+ 9                                    I = I + 1
+10                !$OMP             END SINGLE
+11                !$OMP           END PARALLEL
+12                !$OMP         END CRITICAL (NAME)
+13                !$OMP     END PARALLEL SECTIONS
+14                        END SUBROUTINE CRITICAL_WORK
+
+                                                        Fortran
+
+
+
+
+15   A.18         Binding of barrier Regions
+16                The binding rules call for a barrier region to bind to the closest enclosing
+17                parallel region (see Section 2.8.3 on page 68).
+18                In the following example, the call from the main program to sub2 is conforming because
+19                the barrier region (in sub3) binds to the parallel region in sub2. The call from
+20                the main program to sub1 is conforming because the barrier region binds to the
+21                parallel region in subroutine sub2.
+22                The call from the main program to sub3 is conforming because the barrier region
+23                binds to the implicit inactive parallel region enclosing the sequential part. Also note
+24                that the barrier region in sub3 when called from sub2 only synchronizes the team of
+25                threads in the enclosing parallel region and not all the threads created in sub1.
+
+
+
+
+     210   OpenMP API • DRAFT Version 3.1.2011-0130
+                                        C/C++
+     Example A.18.1c
+
+1    void work(int n) {}
+
+2    void sub3(int n)
+3    {
+4      work(n);
+5      #pragma omp barrier
+6      work(n);
+7    }
+
+ 8   void sub2(int k)
+ 9   {
+10     #pragma omp parallel shared(k)
+11       sub3(k);
+12   }
+
+13   void sub1(int n)
+14   {
+15     int i;
+16     #pragma omp parallel private(i) shared(n)
+17     {
+18       #pragma omp for
+19       for (i=0; i<n; i++)
+20         sub2(i);
+21     }
+22   }
+
+23   int main()
+24   {
+25     sub1(2);
+26     sub2(2);
+27     sub3(2);
+28     return 0;
+29   }
+                                        C/C++
+
+
+
+
+                                                   Appendix A   Examples   211
+                                                       Fortran
+                  Example A.18.1f
+
+1                       SUBROUTINE WORK(N)
+2                         INTEGER N
+3                       END SUBROUTINE WORK
+
+4                       SUBROUTINE SUB3(N)
+5                       INTEGER N
+6                         CALL WORK(N)
+7                 !$OMP   BARRIER
+8                         CALL WORK(N)
+9                       END SUBROUTINE SUB3
+
+10                      SUBROUTINE SUB2(K)
+11                      INTEGER K
+12                !$OMP   PARALLEL SHARED(K)
+13                          CALL SUB3(K)
+14                !$OMP   END PARALLEL
+15                      END SUBROUTINE SUB2
+
+
+16                      SUBROUTINE SUB1(N)
+17                      INTEGER N
+18                        INTEGER I
+19                !$OMP   PARALLEL PRIVATE(I) SHARED(N)
+20                !$OMP     DO
+21                          DO I = 1, N
+22                             CALL SUB2(I)
+23                          END DO
+24                !$OMP   END PARALLEL
+25                      END SUBROUTINE SUB1
+
+26                      PROGRAM EXAMPLE
+27                        CALL SUB1(2)
+28                        CALL SUB2(2)
+29                        CALL SUB3(2)
+30                      END PROGRAM EXAMPLE
+
+                                                       Fortran
+
+
+
+
+31   A.19         The atomic Construct
+32                The following example avoids race conditions (simultaneous updates of an element of x
+33                by multiple threads) by using the atomic construct (Section 2.8.5 on page 71).
+
+
+
+
+     212   OpenMP API • DRAFT Version 3.1.2011-0130
+1    The advantage of using the atomic construct in this example is that it allows updates
+2    of two different elements of x to occur in parallel. If a critical construct (see
+3    Section 2.8.2 on page 67) were used instead, then all updates to elements of x would be
+4    executed serially (though not in any guaranteed order).
+5    Note that the atomic directive applies only to the statement immediately following it.
+6    As a result, elements of y are not updated atomically in this example.
+
+
+                                            C/C++
+     Example A.19.1c
+
+ 7   float work1(int i)
+ 8   {
+ 9     return 1.0 * i;
+10   }
+
+11   float work2(int i)
+12   {
+13      return 2.0 * i;
+14   }
+
+15   void atomic_example(float *x, float *y, int *index, int n)
+16   {
+17     int i;
+
+18       #pragma omp parallel for shared(x, y, index, n)
+19         for (i=0; i<n; i++) {
+20            #pragma omp atomic update
+21            x[index[i]] += work1(i);
+22            y[i] += work2(i);
+23          }
+24   }
+
+25   int main()
+26   {
+27     float x[1000];
+28     float y[10000];
+29     int index[10000];
+30     int i;
+
+31       for (i = 0; i < 10000; i++) {
+32         index[i] = i % 1000;
+33         y[i]=0.0;
+34       }
+35       for (i = 0; i < 1000; i++)
+36         x[i] = 0.0;
+37       a19(x, y, index, 10000);
+38       return 0;
+39   }
+                                            C/C++
+
+
+                                                         Appendix A      Examples       213
+                                                       Fortran
+                  Example A.19.1f
+
+1                         REAL FUNCTION WORK1(I)
+2                           INTEGER I
+3                           WORK1 = 1.0 * I
+4                           RETURN
+5                         END FUNCTION WORK1
+
+ 6                        REAL FUNCTION WORK2(I)
+ 7                          INTEGER I
+ 8                          WORK2 = 2.0 * I
+ 9                          RETURN
+10                        END FUNCTION WORK2
+
+11                        SUBROUTINE SUB(X, Y, INDEX, N)
+12                          REAL X(*), Y(*)
+13                          INTEGER INDEX(*), N
+
+14                         INTEGER I
+
+15                !$OMP    PARALLEL DO SHARED(X, Y, INDEX, N)
+16                           DO I=1,N
+17                !$OMP        ATOMIC UPDATE
+18                               X(INDEX(I)) = X(INDEX(I)) + WORK1(I)
+19                             Y(I) = Y(I) + WORK2(I)
+20                           ENDDO
+
+21                        END SUBROUTINE SUB
+
+22                        PROGRAM ATOMIC_EXAMPLE
+23                          REAL X(1000), Y(10000)
+24                          INTEGER INDEX(10000)
+25                          INTEGER I
+26
+27                         DO I=1,10000
+28                           INDEX(I) = MOD(I, 1000) + 1
+29                           Y(I) = 0.0
+30                         ENDDO
+31
+32                         DO I = 1,1000
+33                           X(I) = 0.0
+34                         ENDDO
+
+35                         CALL SUB(X, Y, INDEX, 10000)
+36
+37                        END PROGRAM ATOMIC_EXAMPLE
+
+                                                       Fortran
+
+
+
+
+     214   OpenMP API • DRAFT Version 3.1.2011-0130
+1    A.20   Restrictions on the atomic Construct
+2           The following non-conforming examples illustrate the restrictions on the atomic
+3           construct given in Section 2.8.5 on page 71.
+
+
+                                                  C/C++
+            Example A.20.1c
+
+4           void atomic_wrong ()
+5           {
+6             union {int n; float x;} u;
+
+ 7          #pragma omp parallel
+ 8            {
+ 9          #pragma omp atomic update
+10              u.n++;
+
+11          #pragma omp atomic update
+12              u.x += 1.0;
+
+13          /* Incorrect because the atomic constructs reference the same location
+14              through incompatible types */
+15            }
+16          }
+                                                 C/C++
+
+                                                 Fortran
+            Example A.20.1f
+
+17                  SUBROUTINE ATOMIC_WRONG()
+18                    INTEGER:: I
+19                    REAL:: R
+20                    EQUIVALENCE(I,R)
+
+21          !$OMP   PARALLEL
+22          !$OMP     ATOMIC UPDATE
+23                      I = I + 1
+24          !$OMP     ATOMIC UPDATE
+25                      R = R + 1.0
+26          ! incorrect because I and R reference the same location
+27          ! but have different types
+28          !$OMP   END PARALLEL
+29                END SUBROUTINE ATOMIC_WRONG
+
+                                                 Fortran
+
+
+                                                              Appendix A      Examples        215
+                                                    C/C++
+                  Example A.20.2c
+
+1                 void atomic_wrong2 ()
+2                 {
+3                   int x;
+4                   int *i;
+5                   float   *r;
+
+6                     i = &x;
+7                     r = (float *)&x;
+
+ 8                #pragma omp parallel
+ 9                  {
+10                #pragma omp atomic update
+11                    *i += 1;
+
+12                #pragma omp atomic update
+13                    *r += 1.0;
+
+14                /* Incorrect because the atomic constructs reference the same location
+15                   through incompatible types */
+
+16                     }
+17                }
+                                                    C/C++
+
+
+
+
+     216   OpenMP API • DRAFT Version 3.1.2011-0130
+                                          Fortran
+1    The following example is non-conforming because I and R reference the same location
+2    but have different types.
+
+     Example A.20.2f
+
+3            SUBROUTINE SUB()
+4              COMMON /BLK/ R
+5              REAL R
+
+6    !$OMP     ATOMIC UPDATE
+7                R = R + 1.0
+8            END SUBROUTINE SUB
+
+ 9           SUBROUTINE ATOMIC_WRONG2()
+10             COMMON /BLK/ I
+11             INTEGER I
+
+12   !$OMP     PARALLEL
+
+13   !$OMP     ATOMIC UPDATE
+14               I = I + 1
+15             CALL SUB()
+16   !$OMP   END PARALLEL
+17         END SUBROUTINE ATOMIC_WRONG2
+
+
+
+
+                                                       Appendix A     Examples      217
+1                 Although the following example might work on some implementations, this is also non-
+2                 conforming:
+
+                  Example A.20.3f
+
+3                         SUBROUTINE ATOMIC_WRONG3
+4                           INTEGER:: I
+5                           REAL:: R
+6                           EQUIVALENCE(I,R)
+
+ 7                !$OMP   PARALLEL
+ 8                !$OMP     ATOMIC UPDATE
+ 9                            I = I + 1
+10                ! incorrect because I and R reference the same location
+11                ! but have different types
+12                !$OMP   END PARALLEL
+
+13                !$OMP   PARALLEL
+14                !$OMP     ATOMIC UPDATE
+15                            R = R + 1.0
+16                ! incorrect because I and R reference the same location
+17                ! but have different types
+18                !$OMP   END PARALLEL
+
+19                        END SUBROUTINE ATOMIC_WRONG3
+
+                                                         Fortran
+
+
+
+
+20   A.21         The flush Construct without a List
+21                The following example (for Section 2.8.6 on page 76) distinguishes the shared variables
+22                affected by a flush construct with no list from the shared objects that are not affected:
+
+
+                                                          C/C++
+                  Example A.21.1c
+
+23                int x, *p = &x;
+
+24                void f1(int *q)
+25                {
+26                  *q = 1;
+27                  #pragma omp flush
+28                  /* x, p, and *q are flushed */
+29                  /* because they are shared and accessible */
+30                  /* q is not flushed because it is not shared. */
+31                }
+
+
+
+     218   OpenMP API • DRAFT Version 3.1.2011-0130
+1    void f2(int *q)
+2    {
+3      #pragma omp barrier
+4      *q = 2;
+5      #pragma omp barrier
+
+ 6       /*    a barrier implies a flush */
+ 7       /*    x, p, and *q are flushed */
+ 8       /*    because they are shared and accessible */
+ 9       /*    q is not flushed because it is not shared. */
+10   }
+
+11   int g(int n)
+12   {
+13     int i = 1, j, sum = 0;
+14     *p = 1;
+15     #pragma omp parallel reduction(+: sum) num_threads(10)
+16     {
+17       f1(&j);
+
+18            /* i, n and sum were not flushed */
+19            /* because they were not accessible in f1 */
+20            /* j was flushed because it was accessible */
+21            sum += j;
+
+22            f2(&j);
+
+23            /* i, n, and sum were not flushed */
+24            /* because they were not accessible in f2 */
+25            /* j was flushed because it was accessible */
+26            sum += i + j + *p + n;
+27       }
+28       return sum;
+29   }
+
+30   int main()
+31   {
+32     int result = g(7);
+33     return result;
+34   }
+                                            C/C++
+
+                                           Fortran
+     Example A.21.1f
+
+35             SUBROUTINE F1(Q)
+36                COMMON /DATA/ X, P
+37                INTEGER, TARGET :: X
+38                INTEGER, POINTER :: P
+39                INTEGER Q
+
+
+                                                       Appendix A   Examples   219
+1                           Q = 1
+2                 !$OMP     FLUSH
+3                           ! X, P and Q are flushed
+4                           ! because they are shared and accessible
+5                         END SUBROUTINE F1
+
+ 6                        SUBROUTINE F2(Q)
+ 7                          COMMON /DATA/ X, P
+ 8                          INTEGER, TARGET :: X
+ 9                          INTEGER, POINTER :: P
+10                          INTEGER Q
+
+11                !$OMP   BARRIER
+12                          Q = 2
+13                !$OMP   BARRIER
+14                          ! a barrier implies a flush
+15                          ! X, P and Q are flushed
+16                          ! because they are shared and accessible
+17                      END SUBROUTINE F2
+
+18                        INTEGER FUNCTION G(N)
+19                          COMMON /DATA/ X, P
+20                          INTEGER, TARGET :: X
+21                          INTEGER, POINTER :: P
+22                          INTEGER N
+23                          INTEGER I, J, SUM
+
+24                         I = 1
+25                         SUM = 0
+26                         P = 1
+27                !$OMP    PARALLEL REDUCTION(+: SUM) NUM_THREADS(10)
+28                           CALL F1(J)
+29                             ! I, N and SUM were not flushed
+30                             !   because they were not accessible in F1
+31                             ! J was flushed because it was accessible
+32                           SUM = SUM + J
+
+33                           CALL F2(J)
+34                             ! I, N, and SUM were not flushed
+35                             !   because they were not accessible in f2
+36                             ! J was flushed because it was accessible
+37                           SUM = SUM + I + J + P + N
+38                !$OMP    END PARALLEL
+
+39                          G = SUM
+40                        END FUNCTION G
+
+41                        PROGRAM FLUSH_NOLIST
+42                          COMMON /DATA/ X, P
+43                          INTEGER, TARGET :: X
+44                          INTEGER, POINTER :: P
+45                          INTEGER RESULT, G
+
+
+
+
+     220   OpenMP API • DRAFT Version 3.1.2011-0130
+1     P => X
+2     RESULT = G(7)
+3     PRINT *, RESULT
+4   END PROGRAM FLUSH_NOLIST
+
+                               Fortran
+
+
+
+
+                                         Appendix A   Examples   221
+1    A.22         Placement of flush, barrier, and
+2                 taskwait Directives
+3                 The following example is non-conforming, because the flush, barrier, taskwait,
+4                 and taskyield directives are stand-alone directives and cannot be the immediate
+5                 substatement of an if statement. See Section 2.8.3 on page 68, Section 2.8.6 on page
+6                 76, Section 2.8.4 on page 70, and Section 2.7.2 on page 62.
+
+
+                                                        C/C++
+                  Example A.22.1c
+
+7                 void standalone_wrong()
+8                 {
+9                   int a = 1;
+
+10                  if (a != 0)
+11                  #pragma omp flush(a)
+12                /* incorrect as flush cannot be immediate substatement
+13                   of if statement */
+
+14                  if (a != 0)
+15                  #pragma omp barrier
+16                /* incorrect as barrier cannot be immediate substatement
+17                   of if statement */
+
+18                  if (a!=0)
+19                  #pragma omp taskyield
+20                /* incorrect as taskyield cannot be immediate substatement of if statement */
+
+21                  if (a != 0)
+22                  #pragma omp taskwait
+23                /* incorrect as taskwait cannot be immediate substatement
+24                   of if statement */
+
+25                }
+
+                                                       C/C++
+
+26                The following example is non-conforming, because the flush, barrier, taskwait,
+27                and taskyield directives are stand-alone directives and cannot be the action
+28                statement of an if statement or a labeled branch target.
+
+
+
+
+     222   OpenMP API • DRAFT Version 3.1.2011-0130
+                                      Fortran
+     Example A.22.1f
+
+1    SUBROUTINE STANDALONE_WRONG()
+2      INTEGER A
+3      A = 1
+4      ! the FLUSH directive must not be the action statement
+5      ! in an IF statement
+6      IF (A .NE. 0) !$OMP FLUSH(A)
+
+7      ! the BARRIER directive must not be the action statement
+8      ! in an IF statement
+9      IF (A .NE. 0) !$OMP BARRIER
+
+10     ! the TASKWAIT directive must not be the action statement
+11     ! in an IF statement
+12     IF (A .NE. 0) !$OMP TASKWAIT
+
+13     ! the TASKYIELD directive must not be the action statement
+14     ! in an IF statement
+15     IF (A .NE. 0) !$OMP TASKYIELD
+
+16     GOTO 100
+
+17     ! the FLUSH directive must not be a labeled branch target
+18     ! statement
+19     100 !$OMP FLUSH(A)
+20     GOTO 200
+
+21     ! the BARRIER directive must not be a labeled branch target
+22     ! statement
+23     200 !$OMP BARRIER
+24     GOTO 300
+
+25     ! the TASKWAIT directive must not be a labeled branch target
+26     ! statement
+27     300 !$OMP TASKWAIT
+28     GOTO 400
+
+29     ! the TASKYIELD directive must not be a labeled branch target
+30     ! statement
+31     400 !$OMP TASKYIELD
+
+32   END SUBROUTINE
+
+
+
+                                      Fortran
+
+
+
+
+                                                  Appendix A       Examples   223
+1                 The following version of the above example is conforming because the flush,
+2                 barrier, taskwait, and taskyield directives are enclosed in a compound
+3                 statement.
+
+
+                                                      C/C++
+                  Example A.22.2c
+
+4                 void standalone_ok()
+5                 {
+6                   int a = 1;
+
+ 7                    #pragma omp   parallel
+ 8                    {
+ 9                       if (a !=   0) {
+10                    #pragma omp   flush(a)
+11                       }
+12                       if (a !=   0) {
+13                    #pragma omp   barrier
+14                       }
+15                       if (a !=   0) {
+16                    #pragma omp   taskwait
+17                       }
+18                    if (a != 0)   {
+19                    #pragma omp   taskyield
+20                        }
+21                    }
+22                }
+                                                      C/C++
+23                The following example is conforming because the flush, barrier, taskwait, and
+24                taskyield directives are enclosed in an if construct or follow the labeled branch
+25                target.
+
+
+                                                      Fortran
+                  Example A.22.2f
+
+26                SUBROUTINE STANDALONE_OK()
+27                  INTEGER A
+28                  A = 1
+29                  IF (A .NE. 0) THEN
+30                    !$OMP FLUSH(A)
+31                  ENDIF
+32                  IF (A .NE. 0) THEN
+33                    !$OMP BARRIER
+34                  ENDIF
+35                  IF (A .NE. 0) THEN
+36                    !$OMP TASKWAIT
+37                  ENDIF
+
+
+
+     224   OpenMP API • DRAFT Version 3.1.2011-0130
+ 1            IF (A .NE. 0) THEN
+ 2              !$OMP TASKYIELD
+ 3            ENDIF
+ 4            GOTO 100
+ 5            100 CONTINUE
+ 6            !$OMP FLUSH(A)
+ 7            GOTO 200
+ 8            200 CONTINUE
+ 9            !$OMP BARRIER
+10            GOTO 300
+11            300 CONTINUE
+12            !$OMP TASKWAIT
+13            GOTO 400
+14            400 CONTINUE
+15            !$OMP TASKYIELD
+16          END SUBROUTINE
+
+
+
+                                                  Fortran
+
+
+
+
+17   A.23   The ordered Clause and the ordered
+18          Construct
+19          Ordered constructs (Section 2.8.7 on page 81) are useful for sequentially ordering the
+20          output from work that is done in parallel. The following program prints out the indices
+21          in sequential order:
+
+
+
+
+                                                                Appendix A       Examples      225
+                                                      C/C++
+                  Example A.23.1c
+
+1                 #include <stdio.h>
+
+2                 void work(int k)
+3                 {
+4                   #pragma omp ordered
+5                     printf(" %d\n", k);
+6                 }
+
+7                 void ordered_example(int lb, int ub, int stride)
+8                 {
+9                   int i;
+
+10                    #pragma omp parallel for ordered schedule(dynamic)
+11                    for (i=lb; i<ub; i+=stride)
+12                      work(i);
+13                }
+
+14                int main()
+15                {
+16                  ordered_example(0, 100, 5);
+17                  return 0;
+18                }
+                                                      C/C++
+
+
+
+
+     226   OpenMP API • DRAFT Version 3.1.2011-0130
+                                          Fortran
+     Example A.23.1f
+
+1          SUBROUTINE WORK(K)
+2            INTEGER k
+
+3    !$OMP ORDERED
+4            WRITE(*,*) K
+5    !$OMP END ORDERED
+
+6          END SUBROUTINE WORK
+
+7          SUBROUTINE SUB(LB, UB, STRIDE)
+8            INTEGER LB, UB, STRIDE
+9            INTEGER I
+
+10   !$OMP PARALLEL DO ORDERED SCHEDULE(DYNAMIC)
+11           DO I=LB,UB,STRIDE
+12             CALL WORK(I)
+13           END DO
+14   !$OMP END PARALLEL DO
+
+15         END SUBROUTINE SUB
+
+16         PROGRAM ORDERED_EXAMPLE
+17           CALL SUB(1,100,5)
+18         END PROGRAM ORDERED_EXAMPLE
+
+                                          Fortran
+19   It is possible to have multiple ordered constructs within a loop region with the
+20   ordered clause specified. The first example is non-conforming because all iterations
+21   execute two ordered regions. An iteration of a loop must not execute more than one
+22   ordered region:
+
+
+
+
+                                                        Appendix A     Examples      227
+                                                        C/C++
+                  Example A.23.2c
+
+1                 void work(int i) {}
+
+ 2                void ordered_wrong(int n)
+ 3                {
+ 4                  int i;
+ 5                  #pragma omp for ordered
+ 6                  for (i=0; i<n; i++) {
+ 7                /* incorrect because an iteration may not execute more than one
+ 8                    ordered region */
+ 9                     #pragma omp ordered
+10                       work(i);
+11                     #pragma omp ordered
+12                       work(i+1);
+13                  }
+14                }
+                                                        C/C++
+
+                                                        Fortran
+                  Example A.23.2f
+
+15                        SUBROUTINE WORK(I)
+16                        INTEGER I
+17                        END SUBROUTINE WORK
+
+18                        SUBROUTINE ORDERED_WRONG(N)
+19                        INTEGER N
+
+20                        INTEGER I
+21                !$OMP   DO ORDERED
+22                        DO I = 1, N
+23                ! incorrect because an iteration may not execute more than one
+24                ! ordered region
+25                !$OMP     ORDERED
+26                            CALL WORK(I)
+27                !$OMP     END ORDERED
+
+28                !$OMP     ORDERED
+29                            CALL WORK(I+1)
+30                !$OMP     END ORDERED
+31                        END DO
+32                      END SUBROUTINE ORDERED_WRONG
+
+                                                        Fortran
+
+
+
+
+     228   OpenMP API • DRAFT Version 3.1.2011-0130
+1    The following is a conforming example with more than one ordered construct. Each
+2    iteration will execute only one ordered region:
+
+
+                                            C/C++
+     Example A.23.3c
+
+3    void work(int i) {}
+4    void ordered_good(int n)
+5    {
+6      int i;
+
+ 7   #pragma omp for ordered
+ 8     for (i=0; i<n; i++) {
+ 9       if (i <= 10) {
+10         #pragma omp ordered
+11            work(i);
+12       }
+
+13           if (i > 10) {
+14             #pragma omp ordered
+15               work(i+1);
+16           }
+17       }
+18   }
+                                            C/C++
+
+                                            Fortran
+     Example A.23.3f
+
+19             SUBROUTINE ORDERED_GOOD(N)
+20             INTEGER N
+
+21   !$OMP       DO ORDERED
+22               DO I = 1,N
+23                 IF (I <= 10) THEN
+24   !$OMP           ORDERED
+25                     CALL WORK(I)
+26   !$OMP           END ORDERED
+27                 ENDIF
+
+28             IF (I > 10) THEN
+29   !$OMP       ORDERED
+30                 CALL WORK(I+1)
+31   !$OMP       END ORDERED
+32             ENDIF
+33           ENDDO
+34         END SUBROUTINE ORDERED_GOOD
+
+                                            Fortran
+
+
+                                                      Appendix A    Examples     229
+1    A.24         The threadprivate Directive
+2                 The following examples demonstrate how to use the threadprivate directive
+3                 (Section 2.9.2 on page 86) to give each thread a separate counter.
+
+
+                                                       C/C++
+                  Example A.24.1c
+
+4                 int counter = 0;
+5                 #pragma omp threadprivate(counter)
+
+ 6                int increment_counter()
+ 7                {
+ 8                  counter++;
+ 9                  return(counter);
+10                }
+                                                       C/C++
+
+                                                     Fortran
+                  Example A.24.1f
+
+11                      INTEGER FUNCTION INCREMENT_COUNTER()
+12                        COMMON/INC_COMMON/COUNTER
+13                !$OMP   THREADPRIVATE(/INC_COMMON/)
+
+14                        COUNTER = COUNTER +1
+15                        INCREMENT_COUNTER = COUNTER
+16                        RETURN
+17                      END FUNCTION INCREMENT_COUNTER
+
+                                                     Fortran
+
+                                                       C/C++
+18                The following example uses threadprivate on a static variable:
+
+                  Example A.24.2c
+
+19                int increment_counter_2()
+20                {
+21                  static int counter = 0;
+22                  #pragma omp threadprivate(counter)
+23                  counter++;
+24                  return(counter);
+25                }
+
+
+
+     230   OpenMP API • DRAFT Version 3.1.2011-0130
+1    The following example demonstrates unspecified behavior for the initialization of a
+2    threadprivate variable. A threadprivate variable is initialized once at an
+3    unspecified point before its first reference. Because a is constructed using the value of x
+4    (which is modified by the statement x++), the value of a.val at the start of the
+5    parallel region could be either 1 or 2. This problem is avoided for b, which uses an
+6    auxiliary const variable and a copy-constructor.
+
+     Example A.24.3c
+
+ 7   class T {
+ 8      public:
+ 9        int val;
+10        T (int);
+11        T (const T&);
+12   };
+
+13   T :: T (int v){
+14      val = v;
+15   }
+
+16   T :: T (const T& t) {
+17      val = t.val;
+18   }
+
+19   void g(T a, T b){
+20      a.val += b.val;
+21   }
+
+22   int x = 1;
+23   T a(x);
+24   const T b_aux(x); /* Capture value of x = 1 */
+25   T b(b_aux);
+26   #pragma omp threadprivate(a, b)
+
+27   void f(int n) {
+28      x++;
+29      #pragma omp parallel for
+30      /* In each thread:
+31       * a is constructed from x (with value 1 or 2?)
+32       * b is copy-constructed from b_aux
+33       */
+
+34       for (int i=0; i<n; i++) {
+35           g(a, b); /* Value of a is unspecified. */
+36       }
+37   }
+                                              C/C++
+
+
+
+                                                            Appendix A       Examples       231
+                                                      Fortran
+1                 The following examples show non-conforming uses and correct uses of the
+2                 threadprivate directive. For more information, see Section 2.9.2 on page 86 and
+3                 Section 2.9.4.1 on page 106.
+4                 The following example is non-conforming because the common block is not declared
+5                 local to the subroutine that refers to it:
+
+                  Example A.24.2f
+
+ 6                      MODULE INC_MODULE
+ 7                        COMMON /T/ A
+ 8                      END MODULE INC_MODULE
+ 9
+10                      SUBROUTINE INC_MODULE_WRONG()
+11                        USE INC_MODULE
+12                !$OMP   THREADPRIVATE(/T/)
+13                      !non-conforming because /T/ not declared in INC_MODULE_WRONG
+14                      END SUBROUTINE INC_MODULE_WRONG
+
+
+
+15                The following example is also non-conforming because the common block is not
+16                declared local to the subroutine that refers to it:
+
+                  Example A.24.3f
+
+17                      SUBROUTINE INC_WRONG()
+18                        COMMON /T/ A
+19                !$OMP   THREADPRIVATE(/T/)
+
+20                        CONTAINS
+21                          SUBROUTINE INC_WRONG_SUB()
+22                !$OMP       PARALLEL COPYIN(/T/)
+23                      !non-conforming because /T/ not declared in INC_WRONG_SUB
+24                !$OMP       END PARALLEL
+25                          END SUBROUTINE INC_WRONG_SUB
+26                      END SUBROUTINE INC_WRONG
+
+
+
+
+     232   OpenMP API • DRAFT Version 3.1.2011-0130
+                                       Fortran (cont.)
+1    The following example is a correct rewrite of the previous example:
+
+     Example A.24.4f
+
+2            SUBROUTINE INC_GOOD()
+3             COMMON /T/ A
+4    !$OMP    THREADPRIVATE(/T/)
+
+5             CONTAINS
+6               SUBROUTINE INC_GOOD_SUB()
+7                 COMMON /T/ A
+8    !$OMP        THREADPRIVATE(/T/)
+
+ 9   !$OMP        PARALLEL COPYIN(/T/)
+10   !$OMP        END PARALLEL
+11             END SUBROUTINE INC_GOOD_SUB
+12           END SUBROUTINE INC_GOOD
+
+
+
+
+                                                         Appendix A        Examples   233
+                                                    Fortran (cont.)
+1                 The following is an example of the use of threadprivate for local variables:
+
+                  Example A.24.5f
+
+ 2                      PROGRAM INC_GOOD2
+ 3                        INTEGER, ALLOCATABLE, SAVE :: A(:)
+ 4                        INTEGER, POINTER, SAVE :: PTR
+ 5                        INTEGER, SAVE :: I
+ 6                        INTEGER, TARGET :: TARG
+ 7                        LOGICAL :: FIRSTIN = .TRUE.
+ 8                !$OMP   THREADPRIVATE(A, I, PTR)
+ 9
+10                         ALLOCATE (A(3))
+11                         A = (/1,2,3/)
+12                         PTR => TARG
+13                         I = 5
+14
+15                !$OMP    PARALLEL COPYIN(I, PTR)
+16                !$OMP      CRITICAL
+17                             IF (FIRSTIN) THEN
+18                               TARG = 4           ! Update target of ptr
+19                               I = I + 10
+20                               IF (ALLOCATED(A)) A = A + 10
+21                               FIRSTIN = .FALSE.
+22                             END IF
+23
+24                               IF (ALLOCATED(A)) THEN
+25                                 PRINT *, 'a = ', A
+26                               ELSE
+27                                 PRINT *, 'A is not allocated'
+28                               END IF
+
+29                               PRINT *, 'ptr = ', PTR
+30                               PRINT *, 'i = ', I
+31                               PRINT *
+
+32                !$OMP       END CRITICAL
+33                !$OMP     END PARALLEL
+34                        END PROGRAM INC_GOOD2
+
+
+35                The above program, if executed by two threads, will print one of the following two sets
+36                of output:
+
+37                a = 11 12 13
+38                ptr = 4
+39                i = 15
+
+40                A is not allocated
+
+
+
+     234   OpenMP API • DRAFT Version 3.1.2011-0130
+1    ptr = 4
+2    i = 5
+
+3    or
+
+
+4    A is not allocated
+5    ptr = 4
+6    i = 15
+
+7    a = 1 2 3
+8    ptr = 4
+9    i = 5
+
+
+
+10   The following is an example of the use of threadprivate for module variables:
+
+     Example A.24.6f
+
+11         MODULE INC_MODULE_GOOD3
+12           REAL, POINTER :: WORK(:)
+13           SAVE WORK
+14   !$OMP   THREADPRIVATE(WORK)
+15         END MODULE INC_MODULE_GOOD3
+16
+17         SUBROUTINE SUB1(N)
+18         USE INC_MODULE_GOOD3
+19   !$OMP   PARALLEL PRIVATE(THE_SUM)
+20           ALLOCATE(WORK(N))
+21           CALL SUB2(THE_SUM)
+22          WRITE(*,*)THE_SUM
+23   !$OMP   END PARALLEL
+24         END SUBROUTINE SUB1
+25
+26          SUBROUTINE SUB2(THE_SUM)
+27            USE INC_MODULE_GOOD3
+28            WORK(:) = 10
+29            THE_SUM=SUM(WORK)
+30          END SUBROUTINE SUB2
+31
+32          PROGRAM INC_GOOD3
+33            N = 10
+34            CALL SUB1(N)
+35          END PROGRAM INC_GOOD3
+
+                                             Fortran
+
+                                             C/C++
+36   The following example illustrates initialization of threadprivate variables for class-type
+37   T. t1 is default constructed, t2 is constructed taking a constructor accepting one
+38   argument of integer type, t3 is copy constructed with argument f():
+
+
+                                                           Appendix A       Examples       235
+                  Example A.24.4c
+
+1                 static T t1;
+2                 #pragma omp threadprivate(t1)
+3                 static T t2( 23 );
+4                 #pragma omp threadprivate(t2)
+5                 static T t3 = f();
+6                 #pragma omp threadprivate(t3)
+
+
+7                 The following example illustrates the use of threadprivate for static class members. The
+8                 threadprivate directive for a static class member must be placed inside the class
+9                 definition.
+
+                  Example A.24.5c
+
+10                class T {
+11                 public:
+12                   static int i;
+13                #pragma omp threadprivate(i)
+14                };
+
+
+                                                         C/C++
+
+
+                                                         C/C++
+
+
+
+
+15   A.25         Parallel Random Access Iterator Loop
+16                The following example shows a parallel random access iterator loop.
+
+
+                  Example A.25.1c
+17                #include <vector>
+18                void iterator_example()
+19                {
+20                  std::vector<int> vec(23);
+21                  std::vector<int>::iterator it;
+22                #pragma omp parallel for default(none) shared(vec)
+23                  for (it = vec.begin(); it < vec.end(); it++)
+24                  {
+25                    // do work with *it //
+26                  }
+27                }
+                                                         C/C++
+
+
+     236   OpenMP API • DRAFT Version 3.1.2011-0130
+                                                   Fortran
+
+
+
+1    A.26   Fortran Restrictions on shared and
+2           private Clauses with Common Blocks
+3           When a named common block is specified in a private, firstprivate, or
+4           lastprivate clause of a construct, none of its members may be declared in another
+5           data-sharing attribute clause on that construct. The following examples illustrate this
+6           point. For more information, see Section 2.9.3 on page 90.
+7           The following example is conforming:
+
+            Example A.26.1f
+
+ 8                  SUBROUTINE COMMON_GOOD()
+ 9                    COMMON /C/ X,Y
+10                    REAL X, Y
+
+11          !$OMP     PARALLEL PRIVATE (/C/)
+12                      ! do work here
+13          !$OMP     END PARALLEL
+
+14          !$OMP   PARALLEL SHARED (X,Y)
+15                    ! do work here
+16          !$OMP   END PARALLEL
+17                END SUBROUTINE COMMON_GOOD
+
+
+
+
+                                                                Appendix A       Examples      237
+                                                      Fortran (cont.)
+1                 The following example is also conforming:
+
+                  Example A.26.2f
+
+2                         SUBROUTINE COMMON_GOOD2()
+3                            COMMON /C/ X,Y
+4                            REAL X, Y
+
+5                           INTEGER I
+
+ 6                !$OMP     PARALLEL
+ 7                !$OMP       DO PRIVATE(/C/)
+ 8                            DO I=1,1000
+ 9                              ! do work here
+10                            ENDDO
+11                !$OMP       END DO
+12                !
+13                !$OMP     DO PRIVATE(X)
+14                          DO I=1,1000
+15                            ! do work here
+16                          ENDDO
+17                !$OMP     END DO
+18                !$OMP   END PARALLEL
+19                      END SUBROUTINE COMMON_GOOD2
+
+
+20                The following example is conforming:
+
+                  Example A.26.3f
+
+21                         SUBROUTINE COMMON_GOOD3()
+22                           COMMON /C/ X,Y
+
+23                !$OMP     PARALLEL PRIVATE (/C/)
+24                            ! do work here
+25                !$OMP     END PARALLEL
+
+26                !$OMP   PARALLEL SHARED (/C/)
+27                          ! do work here
+28                !$OMP   END PARALLEL
+29                      END SUBROUTINE COMMON_GOOD3
+
+
+
+
+     238   OpenMP API • DRAFT Version 3.1.2011-0130
+1           The following example is non-conforming because x is a constituent element of c:
+
+            Example A.26.4f
+
+2                 SUBROUTINE COMMON_WRONG()
+3                   COMMON /C/ X,Y
+4           ! Incorrect because X is a constituent element of C
+5           !$OMP   PARALLEL PRIVATE(/C/), SHARED(X)
+6                     ! do work here
+7           !$OMP   END PARALLEL
+8                 END SUBROUTINE COMMON_WRONG
+
+
+
+ 9          The following example is non-conforming because a common block may not be
+10          declared both shared and private:
+
+            Example A.26.5f
+
+11                SUBROUTINE COMMON_WRONG2()
+12                  COMMON /C/ X,Y
+13          ! Incorrect: common block C cannot be declared both
+14          ! shared and private
+15          !$OMP   PARALLEL PRIVATE (/C/), SHARED(/C/)
+16                    ! do work here
+17          !$OMP   END PARALLEL
+
+18                END SUBROUTINE COMMON_WRONG2
+
+                                                  Fortran
+
+
+
+
+19   A.27   The default(none) Clause
+20          The following example distinguishes the variables that are affected by the
+21          default(none) clause from those that are not. For more information on the
+22          default clause, see Section 2.9.3.1 on page 91.
+
+
+
+
+                                                               Appendix A      Examples        239
+                                                       C/C++
+                  Example A.27.1c
+
+1                 #include <omp.h>
+2                 int x, y, z[1000];
+3                 #pragma omp threadprivate(x)
+
+4                 void default_none(int a) {
+5                   const int c = 1;
+6                   int i = 0;
+
+ 7                    #pragma omp parallel default(none) private(a) shared(z)
+ 8                    {
+ 9                       int j = omp_get_num_threads();
+10                            /* O.K. - j is declared within parallel region */
+11                       a = z[j];   /* O.K. - a is listed in private clause */
+12                                   /*       - z is listed in shared clause */
+13                       x = c;      /* O.K. - x is threadprivate */
+14                                   /*       - c has const-qualified type */
+15                       z[i] = y;   /* Error - cannot reference i or y here */
+
+16                    #pragma omp for firstprivate(y)
+17                           /* Error - Cannot reference y in the firstprivate clause */
+18                       for (i=0; i<10 ; i++) {
+19                          z[i] = i; /* O.K. - i is the loop iteration variable */
+20                       }
+
+21                        z[i] = y;   /* Error - cannot reference i or y here */
+22                    }
+23                }
+                                                       C/C++
+
+
+
+
+     240   OpenMP API • DRAFT Version 3.1.2011-0130
+                                                  Fortran
+            Example A.27.1f
+
+1                   SUBROUTINE DEFAULT_NONE(A)
+2                   INCLUDE "omp_lib.h"     ! or USE OMP_LIB
+3
+4                   INTEGER A
+
+5                 INTEGER X, Y, Z(1000)
+6                 COMMON/BLOCKX/X
+7                 COMMON/BLOCKY/Y
+8                 COMMON/BLOCKZ/Z
+9           !$OMP THREADPRIVATE(/BLOCKX/)
+
+10                    INTEGER I, J
+11                    i = 1
+
+12          !$OMP     PARALLEL DEFAULT(NONE) PRIVATE(A) SHARED(Z) PRIVATE(J)
+13                      J = OMP_GET_NUM_THREADS();
+14                               ! O.K. - J is listed in PRIVATE clause
+15                      A = Z(J) ! O.K. - A is listed in PRIVATE clause
+16                               !       - Z is listed in SHARED clause
+17                      X = 1    ! O.K. - X is THREADPRIVATE
+18                      Z(I) = Y ! Error - cannot reference I or Y here
+
+19          !$OMP DO firstprivate(y)
+20              ! Error - Cannot reference y in the firstprivate clause
+21                    DO I = 1,10
+22                       Z(I) = I ! O.K. - I is the loop iteration variable
+23                    END DO
+
+
+24                      Z(I) = Y    ! Error - cannot reference I or Y here
+25          !$OMP     END PARALLEL
+26                  END SUBROUTINE DEFAULT_NONE
+
+                                                  Fortran
+
+
+                                                  Fortran
+
+
+
+27   A.28   Race Conditions Caused by Implied
+28          Copies of Shared Variables in Fortran
+29          The following example contains a race condition, because the shared variable, which is
+30          an array section, is passed as an actual argument to a routine that has an assumed-size
+31          array as its dummy argument (see Section 2.9.3.2 on page 93). The subroutine call
+
+
+                                                                Appendix A      Examples       241
+1                 passing an array section argument may cause the compiler to copy the argument into a
+2                 temporary location prior to the call and copy from the temporary location into the
+3                 original variable when the subroutine returns. This copying would cause races in the
+4                 parallel region.
+
+                  Example A.28.1f
+
+ 5                SUBROUTINE SHARED_RACE
+ 6
+ 7                  INCLUDE "omp_lib.h"          ! or USE OMP_LIB
+ 8
+ 9                  REAL A(20)
+10                  INTEGER MYTHREAD
+
+11                !$OMP PARALLEL SHARED(A) PRIVATE(MYTHREAD)
+
+12                  MYTHREAD = OMP_GET_THREAD_NUM()
+13                  IF (MYTHREAD .EQ. 0) THEN
+14                     CALL SUB(A(1:10)) ! compiler may introduce writes to A(6:10)
+15                  ELSE
+16                     A(6:10) = 12
+17                  ENDIF
+
+18                !$OMP END PARALLEL
+
+19                END SUBROUTINE SHARED_RACE
+
+20                SUBROUTINE SUB(X)
+21                  REAL X(*)
+22                  X(1:5) = 4
+23                END SUBROUTINE SUB
+
+                                                         Fortran
+
+
+
+
+24   A.29         The private Clause
+25                In the following example, the values of original list items i and j are retained on exit
+26                from the parallel region, while the private list items i and j are modified within the
+27                parallel construct. For more information on the private clause, see
+28                Section 2.9.3.3 on page 94.
+
+
+
+
+     242   OpenMP API • DRAFT Version 3.1.2011-0130
+                                            C/C++
+     Example A.29.1c
+
+1    #include <stdio.h>
+2    #include <assert.h>
+
+3    int main()
+4    {
+5      int i, j;
+6      int *ptr_i, *ptr_j;
+
+7        i = 1;
+8        j = 2;
+
+ 9       ptr_i = &i;
+10       ptr_j = &j;
+
+11       #pragma omp parallel private(i) firstprivate(j)
+12       {
+13         i = 3;
+14         j = j + 2;
+15         assert (*ptr_i == 1 && *ptr_j == 2);
+16       }
+
+17       assert(i == 1 && j == 2);
+
+18       return 0;
+19   }
+                                            C/C++
+
+                                           Fortran
+     Example A.29.1f
+
+20           PROGRAM PRIV_EXAMPLE
+21             INTEGER I, J
+
+22                I = 1
+23                J = 2
+
+24   !$OMP        PARALLEL PRIVATE(I) FIRSTPRIVATE(J)
+25                  I = 3
+26                  J = J + 2
+27   !$OMP        END PARALLEL
+
+28             PRINT *, I, J ! I .eq. 1 .and. J .eq. 2
+29           END PROGRAM PRIV_EXAMPLE
+
+                                           Fortran
+
+
+
+                                                        Appendix A   Examples   243
+1                 In the following example, all uses of the variable a within the loop construct in the
+2                 routine f refer to a private list item a, while it is unspecified whether references to a in
+3                 the routine g are to a private list item or the original list item.
+
+
+                                                           C/C++
+                  Example A.29.2c
+
+4                 int a;
+
+5                 void g(int k) {
+6                   a = k; /* Accessed in the region but outside of the construct;
+7                           * therefore unspecified whether original or private list
+8                           * item is modified. */
+9                 }
+
+
+10                void f(int n) {
+11                  int a = 0;
+12
+13                    #pragma omp parallel for private(a)
+14                     for (int i=1; i<n; i++) {
+15                         a = i;
+16                         g(a*2);     /* Private copy of "a" */
+17                      }
+18                }
+                                                           C/C++
+
+
+
+
+     244   OpenMP API • DRAFT Version 3.1.2011-0130
+                                          Fortran
+     Example A.29.2f
+
+1            MODULE PRIV_EXAMPLE2
+2               REAL A
+
+3               CONTAINS
+
+4                SUBROUTINE G(K)
+5                  REAL K
+6                  A = K ! Accessed in the region but outside of the
+7                         ! construct; therefore unspecified whether
+8                         ! original or private list item is modified.
+9                END SUBROUTINE G
+
+10               SUBROUTINE F(N)
+11               INTEGER N
+12               REAL A
+13
+14                 INTEGER I
+15   !$OMP         PARALLEL DO PRIVATE(A)
+16                   DO I = 1,N
+17                     A = I
+18                     CALL G(A*2)
+19                   ENDDO
+20   !$OMP         END PARALLEL DO
+21               END SUBROUTINE F
+
+22            END MODULE PRIV_EXAMPLE2
+
+                                          Fortran
+23   The following example demonstrates that a list item that appears in a private clause
+24   in a parallel construct may also appear in a private clause in an enclosed
+25   worksharing construct, which results in an additional private copy.
+
+
+
+
+                                                       Appendix A      Examples      245
+                                                       C/C++
+                  Example A.29.3c
+
+1                 #include <assert.h>
+2                 void priv_example3()
+3                 {
+4                   int i, a;
+
+ 5                    #pragma omp parallel private(a)
+ 6                    {
+ 7                       a = 1;
+ 8                      #pragma omp parallel for private(a)
+ 9                         for (i=0; i<10; i++)
+10                       {
+11                          a = 2;
+12                       }
+13                      assert(a == 1);
+14                    }
+15                }
+                                                       C/C++
+
+                                                       Fortran
+                  Example A.29.3f
+
+16                        SUBROUTINE PRIV_EXAMPLE3()
+17                          INTEGER I, A
+
+18                !$OMP   PARALLEL PRIVATE(A)
+19                         A = 1
+20                !$OMP     PARALLEL DO PRIVATE(A)
+21                          DO I = 1, 10
+22                            A = 2
+23                          END DO
+24                !$OMP     END PARALLEL DO
+25                        PRINT *, A ! Outer A still has value 1
+26                !$OMP   END PARALLEL
+27                      END SUBROUTINE PRIV_EXAMPLE3
+
+                                                       Fortran
+
+
+
+
+     246   OpenMP API • DRAFT Version 3.1.2011-0130
+                                                  Fortran
+
+
+
+1    A.30   Fortran Restrictions on Storage
+2           Association with the private Clause
+3           The following non-conforming examples illustrate the implications of the private
+4           clause rules with regard to storage association (see Section 2.9.3.3 on page 94).
+
+            Example A.30.1f
+
+5                    SUBROUTINE SUB()
+6                    COMMON /BLOCK/ X
+7                    PRINT *,X               ! X is undefined
+8                    END SUBROUTINE SUB
+
+ 9                 PROGRAM PRIV_RESTRICT
+10                   COMMON /BLOCK/ X
+11                   X = 1.0
+12          !$OMP    PARALLEL PRIVATE (X)
+13                   X = 2.0
+14                   CALL SUB()
+15          !$OMP    END PARALLEL
+16                END PROGRAM PRIV_RESTRICT
+
+
+            Example A.30.2f
+
+17                  PROGRAM PRIV_RESTRICT2
+18                    COMMON /BLOCK2/ X
+19                    X = 1.0
+
+20          !$OMP     PARALLEL PRIVATE (X)
+21                      X = 2.0
+22                      CALL SUB()
+23          !$OMP     END PARALLEL
+
+24                   CONTAINS
+
+25                     SUBROUTINE SUB()
+26                     COMMON /BLOCK2/ Y
+
+27                     PRINT *,X                  ! X is undefined
+28                     PRINT *,Y                  ! Y is undefined
+29                     END SUBROUTINE SUB
+
+30                   END PROGRAM PRIV_RESTRICT2
+
+
+
+
+                                                                Appendix A    Examples      247
+1
+
+
+                                                        Fortran
+                  Example A.30.3f
+
+2                          PROGRAM PRIV_RESTRICT3
+3                          EQUIVALENCE (X,Y)
+4                          X = 1.0
+
+ 5                !$OMP   PARALLEL PRIVATE(X)
+ 6                          PRINT *,Y                      ! Y is undefined
+ 7                          Y = 10
+ 8                          PRINT *,X                      ! X is undefined
+ 9                !$OMP   END PARALLEL
+10                      END PROGRAM PRIV_RESTRICT3
+
+
+
+
+                  Example A.30.4f
+
+11                        PROGRAM PRIV_RESTRICT4
+12                          INTEGER I, J
+13                          INTEGER A(100), B(100)
+14                          EQUIVALENCE (A(51), B(1))
+
+15                !$OMP PARALLEL DO DEFAULT(PRIVATE) PRIVATE(I,J) LASTPRIVATE(A)
+16                          DO I=1,100
+17                             DO J=1,100
+18                               B(J) = J - 1
+19                             ENDDO
+
+20                              DO J=1,100
+21                                A(J) = J    ! B becomes undefined at this point
+22                              ENDDO
+
+23                             DO J=1,50
+24                                B(J) = B(J) + 1 ! B is undefined
+25                                          ! A becomes undefined at this point
+26                             ENDDO
+27                          ENDDO
+28                !$OMP END PARALLEL DO        ! The LASTPRIVATE write for A has
+29                                             ! undefined results
+
+30                          PRINT *, B     ! B is undefined since the LASTPRIVATE
+31                                         ! write of A was not defined
+32                         END PROGRAM PRIV_RESTRICT4
+
+
+
+
+     248   OpenMP API • DRAFT Version 3.1.2011-0130
+     Example A.30.5f
+
+ 1           SUBROUTINE SUB1(X)
+ 2             DIMENSION X(10)
+ 3
+ 4             !   This use of X does not conform to the
+ 5             !   specification. It would be legal Fortran 90,
+ 6             !   but the OpenMP private directive allows the
+ 7             !   compiler to break the sequence association that
+ 8             !   A had with the rest of the common block.
+ 9
+10             FORALL (I = 1:10) X(I) = I
+11           END SUBROUTINE SUB1
+
+12           PROGRAM PRIV_RESTRICT5
+13             COMMON /BLOCK5/ A
+
+14             DIMENSION B(10)
+15             EQUIVALENCE (A,B(1))
+
+16             ! the common block has to be at least 10 words
+17             A = 0
+
+18   !$OMP     PARALLEL PRIVATE(/BLOCK5/)
+19
+20                 !   Without the private clause,
+21                 !   we would be passing a member of a sequence
+22                 !   that is at least ten elements long.
+23                 !   With the private clause, A may no longer be
+24                 !   sequence-associated.
+
+25                 CALL SUB1(A)
+26   !$OMP         MASTER
+27                   PRINT *, A
+28   !$OMP         END MASTER
+
+29   !$OMP     END PARALLEL
+30           END PROGRAM PRIV_RESTRICT5
+
+                                            Fortran
+
+
+
+
+                                                        Appendix A   Examples   249
+                                                            C/C++
+
+
+1    A.31         C/C++ Arrays in a firstprivate Clause
+2                 The following example illustrates the size and value of list items of array or pointer type
+3                 in a firstprivate clause (Section 2.9.3.4 on page 97). The size of new list items is
+4                 based on the type of the corresponding original list item, as determined by the base
+5                 language.
+6                 In this example:
+7                 • The type of A is array of two arrays of two ints.
+8                 • The type of B is adjusted to pointer to array of n ints, because it is a function parameter.
+9                 • The type of C is adjusted to pointer to int, because it is a function parameter.
+10                • The type of D is array of two arrays of two ints.
+11                • The type of E is array of n arrays of n ints.
+12                Note that B and E involve variable length array types.
+13                The new items of array type are initialized as if each integer element of the original
+14                array is assigned to the corresponding element of the new array. Those of pointer type
+15                are initialized as if by assignment from the original item to the new item.
+
+
+
+
+     250   OpenMP API • DRAFT Version 3.1.2011-0130
+            Example A.31.1c
+
+1           #include <assert.h>
+
+2           int A[2][2] = {1, 2, 3, 4};
+
+3           void f(int n, int B[n][n], int C[])
+4           {
+5             int D[2][2] = {1, 2, 3, 4};
+6             int E[n][n];
+
+7               assert(n >= 2);
+8               E[1][1] = 4;
+
+ 9              #pragma omp parallel firstprivate(B, C, D, E)
+10              {
+11                assert(sizeof(B) == sizeof(int (*)[n]));
+12                assert(sizeof(C) == sizeof(int*));
+13                assert(sizeof(D) == 4 * sizeof(int));
+14                assert(sizeof(E) == n * n * sizeof(int));
+
+15                  /* Private B and C have values of original B and C. */
+16                  assert(&B[1][1] == &A[1][1]);
+17                  assert(&C[3] == &A[1][1]);
+18                  assert(D[1][1] == 4);
+19                  assert(E[1][1] == 4);
+20              }
+21          }
+
+22          int main() {
+23            f(2, A, A[0]);
+24            return 0;
+25          }
+                                                    C/C++
+
+
+
+
+26   A.32   The lastprivate Clause
+27          Correct execution sometimes depends on the value that the last iteration of a loop
+28          assigns to a variable. Such programs must list all such variables in a lastprivate
+29          clause (Section 2.9.3.5 on page 99) so that the values of the variables are the same as
+30          when the loop is executed sequentially.
+
+
+
+
+                                                                 Appendix A       Examples      251
+                                                         C/C++
+                  Example A.32.1c
+
+1                 void lastpriv (int n, float *a, float *b)
+2                 {
+3                   int i;
+
+4                     #pragma omp parallel
+5                     {
+6                       #pragma omp for lastprivate(i)
+7                       for (i=0; i<n-1; i++)
+8                         a[i] = b[i] + b[i+1];
+9                     }
+
+10                    a[i]=b[i];       /* i == n-1 here */
+11                }
+                                                         C/C++
+
+                                                      Fortran
+                  Example A.32.1f
+
+12                        SUBROUTINE LASTPRIV(N, A, B)
+
+13                         INTEGER N
+14                         REAL A(*), B(*)
+15                         INTEGER I
+
+16                !$OMP PARALLEL
+17                !$OMP DO LASTPRIVATE(I)
+
+18                         DO I=1,N-1
+19                           A(I) = B(I) + B(I+1)
+20                         ENDDO
+
+21                !$OMP END PARALLEL
+
+22                         A(I) = B(I)        ! I has the value of N here
+
+23                        END SUBROUTINE LASTPRIV
+
+                                                      Fortran
+
+
+
+
+24   A.33         The reduction Clause
+25                The following example demonstrates the reduction clause (Section 2.9.3.6 on page
+26                101):
+
+     252   OpenMP API • DRAFT Version 3.1.2011-0130
+                                            C/C++
+     Example A.33.1c
+
+1    void reduction1(float *x, int *y, int n)
+2    {
+3      int i, b;
+4      float a;
+
+5        a = 0.0;
+6        b = 0;
+
+7    #pragma omp parallel for private(i) shared(x, y, n) \
+8                             reduction(+:a) reduction(^:b)
+9      for (i=0; i<n; i++) {
+
+10            a += x[i];
+11            b ^= y[i];
+
+12       }
+
+13   }
+                                            C/C++
+
+                                            Fortran
+     Example A.33.1f
+
+14              SUBROUTINE REDUCTION1(A, B, X, Y, N)
+
+15                INTEGER N
+16                REAL X(*), Y(*), A, B
+
+17   !$OMP PARALLEL DO PRIVATE(I) SHARED(X, N) REDUCTION(+:A)
+18   !$OMP& REDUCTION(MIN:B)
+
+19                DO I=1,N
+
+20                  A = A + X(I)
+
+21                  B = MIN(B, Y(I))
+
+
+22   !       Note that some reductions can be expressed in
+23   !       other forms. For example, the MIN could be expressed as
+24   !       IF (B > Y(I)) B = Y(I)
+
+25                END DO
+
+26              END SUBROUTINE REDUCTION1
+
+                                            Fortran
+
+                                                       Appendix A      Examples   253
+1                 A common implementation of the preceding example is to treat it as if it had been
+2                 written as follows:
+
+
+                                                        C/C++
+                  Example A.33.2c
+
+3                 void reduction2(float *x, int *y, int n)
+4                 {
+5                   int i, b, b_p;
+6                   float a, a_p;
+
+7                     a = 0.0;
+8                     b = 0;
+
+ 9                #pragma omp parallel shared(a, b, x, y, n) \
+10                                     private(a_p, b_p)
+11                  {
+12                    a_p = 0.0;
+13                    b_p = 0;
+
+14                #pragma omp for private(i)
+15                    for (i=0; i<n; i++) {
+
+16                            a_p += x[i];
+17                            b_p ^= y[i];
+
+18                        }
+
+19                #pragma omp critical
+20                    {
+21                      a += a_p;
+22                      b ^= b_p;
+23                    }
+
+24                    }
+25                }
+                                                        C/C++
+
+
+
+
+     254   OpenMP API • DRAFT Version 3.1.2011-0130
+                                         Fortran
+     Example A.33.2f
+
+1             SUBROUTINE REDUCTION2 (A, B, X, Y, N)
+2
+3              INTEGER N
+4              REAL X(*), Y(*), A, B, A_P, B_P
+
+5    !$OMP PARALLEL SHARED(X, Y, N, A, B) PRIVATE(A_P, B_P)
+
+6              A_P = 0.0
+7              B_P = HUGE(B_P)
+
+ 8   !$OMP     DO PRIVATE(I)
+ 9             DO I=1,N
+10               A_P = A_P + X(I)
+11               B_P = MIN(B_P, Y(I))
+12             ENDDO
+13   !$OMP     END DO
+
+14   !$OMP     CRITICAL
+15               A = A + A_P
+16               B = MIN(B, B_P)
+17   !$OMP     END CRITICAL
+
+18   !$OMP END PARALLEL
+
+19           END SUBROUTINE REDUCTION2
+
+
+
+20   The following program is non-conforming because the reduction is on the intrinsic
+21   procedure name MAX but that name has been redefined to be the variable named MAX.
+
+     Example A.33.3f
+
+22    PROGRAM REDUCTION_WRONG
+23    MAX = HUGE(0)
+24    M = 0
+25
+26    !$OMP PARALLEL DO REDUCTION(MAX: M)
+27   ! MAX is no longer the intrinsic so this is non-conforming
+28    DO I = 1, 100
+29       CALL SUB(M,I)
+30    END DO
+31
+32    END PROGRAM REDUCTION_WRONG
+33
+34    SUBROUTINE SUB(M,I)
+35       M = MAX(M,I)
+36    END SUBROUTINE SUB
+
+
+                                                      Appendix A     Examples      255
+1                 The following conforming program performs the reduction using the intrinsic procedure
+2                 name MAX even though the intrinsic MAX has been renamed to REN.
+
+                  Example A.33.4f
+
+3                 MODULE M
+4                    INTRINSIC MAX
+5                 END MODULE M
+
+ 6                PROGRAM REDUCTION3
+ 7                   USE M, REN => MAX
+ 8                   N = 0
+ 9                !$OMP PARALLEL DO REDUCTION(REN: N)          ! still does MAX
+10                   DO I = 1, 100
+11                      N = MAX(N,I)
+12                   END DO
+13                END PROGRAM REDUCTION3
+
+
+14                The following conforming program performs the reduction using intrinsic procedure
+15                name MAX even though the intrinsic MAX has been renamed to MIN.
+
+                  Example A.33.5f
+
+16                MODULE MOD
+17                   INTRINSIC MAX, MIN
+18                END MODULE MOD
+
+19                PROGRAM REDUCTION4
+20                   USE MOD, MIN=>MAX, MAX=>MIN
+21                   REAL :: R
+22                   R = -HUGE(0.0)
+
+23                !$OMP PARALLEL DO REDUCTION(MIN: R)          ! still does MAX
+24                   DO I = 1, 1000
+25                      R = MIN(R, SIN(REAL(I)))
+26                   END DO
+27                   PRINT *, R
+28                END PROGRAM REDUCTION4
+
+                                                        Fortran
+29                The following example is non-conforming because the initialization (a = 0) of the
+30                original list item "a" is not synchronized with the update of "a" as a result of the
+31                reduction computation in the for loop. Therefore, the example may print an incorrect
+32                value for "a".
+
+
+
+
+     256   OpenMP API • DRAFT Version 3.1.2011-0130
+1    To avoid this problem, the initialization of the original list item "a" should complete
+2    before any update of "a" as a result of the reduction clause. This can be achieved by
+3    adding an explicit barrier after the assignment a = 0, or by enclosing the assignment a =
+4    0 in a single directive (which has an implied barrier), or by initializing "a" before the
+5    start of the parallel region.
+
+
+                                              C/C++
+     Example A.33.3c
+
+6    #include <stdio.h>
+
+7    int main (void)
+8    {
+9      int a, i;
+
+10       #pragma omp parallel shared(a) private(i)
+11       {
+12         #pragma omp master
+13         a = 0;
+
+14           // To avoid race conditions, add a barrier here.
+
+15           #pragma omp for reduction(+:a)
+16           for (i = 0; i < 10; i++) {
+17               a += i;
+18           }
+
+19           #pragma omp single
+20           printf ("Sum is %d\n", a);
+21       }
+22   }
+                                              C/C++
+
+
+
+
+                                                           Appendix A      Examples       257
+                                                        Fortran
+                  Example A.33.6f
+
+1                       INTEGER A, I
+
+2                 !$OMP PARALLEL SHARED(A) PRIVATE(I)
+
+3                 !$OMP MASTER
+4                       A = 0
+5                 !$OMP END MASTER
+
+6                       ! To avoid race conditions, add a barrier here.
+
+ 7                !$OMP DO REDUCTION(+:A)
+ 8                      DO I= 0, 9
+ 9                         A = A + I
+10                      END DO
+
+11                !$OMP SINGLE
+12                      PRINT *, "Sum is ", A
+13                !$OMP END SINGLE
+
+14                !$OMP END PARALLEL
+15                      END
+
+                                                        Fortran
+
+
+
+
+16   A.34         The copyin Clause
+17                The copyin clause (see Section 2.9.4.1 on page 106) is used to initialize threadprivate
+18                data upon entry to a parallel region. The value of the threadprivate variable in the
+19                master thread is copied to the threadprivate variable of each other team member.
+
+
+
+
+     258   OpenMP API • DRAFT Version 3.1.2011-0130
+                                       C/C++
+     Example A.34.1c
+
+1    #include <stdlib.h>
+
+2    float* work;
+3    int size;
+4    float tol;
+
+5    #pragma omp threadprivate(work,size,tol)
+
+ 6   void build()
+ 7   {
+ 8     int i;
+ 9     work = (float*)malloc( sizeof(float)*size );
+10     for( i = 0; i < size; ++i ) work[i] = tol;
+11   }
+
+12   void copyin_example( float t, int n )
+13   {
+14     tol = t;
+15     size = n;
+16     #pragma omp parallel copyin(tol,size)
+17     {
+18       build();
+19     }
+20   }
+
+
+
+                                       C/C++
+
+
+
+
+                                                  Appendix A   Examples   259
+                                                           Fortran
+                  Example A.34.1f
+
+1                       MODULE M
+2                         REAL, POINTER, SAVE :: WORK(:)
+3                         INTEGER :: SIZE
+4                         REAL :: TOL
+5                 !$OMP   THREADPRIVATE(WORK,SIZE,TOL)
+6                       END MODULE M
+
+ 7                      SUBROUTINE COPYIN_EXAMPLE( T, N )
+ 8                        USE M
+ 9                        REAL :: T
+10                        INTEGER :: N
+11                        TOL = T
+12                        SIZE = N
+13                !$OMP   PARALLEL COPYIN(TOL,SIZE)
+14                        CALL BUILD
+15                !$OMP   END PARALLEL
+16                      END SUBROUTINE COPYIN_EXAMPLE
+
+17                       SUBROUTINE BUILD
+18                         USE M
+19                         ALLOCATE(WORK(SIZE))
+20                         WORK = TOL
+21                       END SUBROUTINE BUILD
+
+                                                           Fortran
+
+
+
+
+22   A.35         The copyprivate Clause
+23                The copyprivate clause (see Section 2.9.4.2 on page 107) can be used to broadcast
+24                values acquired by a single thread directly to all instances of the private variables in the
+25                other threads. In this example, if the routine is called from the sequential part, its
+26                behavior is not affected by the presence of the directives. If it is called from a
+27                parallel region, then the actual arguments with which a and b are associated must be
+28                private.
+29                The thread that executes the structured block associated with the single construct
+30                broadcasts the values of the private variables a, b, x, and y from its implicit task's data
+31                environment to the data environments of the other implicit tasks in the thread team. The
+32                broadcast completes before any of the threads have left the barrier at the end of the
+33                construct.
+
+
+
+
+     260   OpenMP API • DRAFT Version 3.1.2011-0130
+                                         C/C++
+     Example A.35.1c
+
+1    #include <stdio.h>
+2    float x, y;
+3    #pragma omp threadprivate(x, y)
+
+4    void init(float a, float b ) {
+5        #pragma omp single copyprivate(a,b,x,y)
+6        {
+7            scanf("%f %f %f %f", &a, &b, &x, &y);
+8        }
+9    }
+                                         C/C++
+
+                                        Fortran
+     Example A.35.1f
+
+10         SUBROUTINE INIT(A,B)
+11         REAL A, B
+12           COMMON /XY/ X,Y
+13   !$OMP   THREADPRIVATE (/XY/)
+
+14   !$OMP     SINGLE
+15               READ (11) A,B,X,Y
+16   !$OMP     END SINGLE COPYPRIVATE (A,B,/XY/)
+
+17           END SUBROUTINE INIT
+
+                                        Fortran
+
+
+
+
+                                                     Appendix A   Examples   261
+1                 In this example, assume that the input must be performed by the master thread. Since the
+2                 master construct does not support the copyprivate clause, it cannot broadcast the
+3                 input value that is read. However, copyprivate is used to broadcast an address where
+4                 the input value is stored.
+
+
+                                                         C/C++
+                  Example A.35.2c
+
+5                 #include <stdio.h>
+6                 #include <stdlib.h>
+
+7                 float read_next( ) {
+8                   float * tmp;
+9                   float return_val;
+
+10                    #pragma omp single copyprivate(tmp)
+11                    {
+12                      tmp = (float *) malloc(sizeof(float));
+13                    } /* copies the pointer only */
+
+
+14                    #pragma omp master
+15                    {
+16                      scanf("%f", tmp);
+17                    }
+
+18                    #pragma omp barrier
+19                    return_val = *tmp;
+20                    #pragma omp barrier
+
+21                    #pragma omp single nowait
+22                    {
+23                      free(tmp);
+24                    }
+
+25                    return return_val;
+26                }
+                                                         C/C++
+
+
+
+
+     262   OpenMP API • DRAFT Version 3.1.2011-0130
+                                           Fortran
+     Example A.35.2f
+
+1              REAL FUNCTION READ_NEXT()
+2              REAL, POINTER :: TMP
+
+3    !$OMP     SINGLE
+4                ALLOCATE (TMP)
+5    !$OMP     END SINGLE COPYPRIVATE (TMP)     ! copies the pointer only
+
+6    !$OMP     MASTER
+7                READ (11) TMP
+8    !$OMP     END MASTER
+
+ 9   !$OMP     BARRIER
+10               READ_NEXT = TMP
+11   !$OMP     BARRIER
+
+12   !$OMP     SINGLE
+13               DEALLOCATE (TMP)
+14   !$OMP     END SINGLE NOWAIT
+15             END FUNCTION READ_NEXT
+
+                                           Fortran
+16   Suppose that the number of lock variables required within a parallel region cannot
+17   easily be determined prior to entering it. The copyprivate clause can be used to
+18   provide access to shared lock variables that are allocated within that parallel region.
+
+
+                                            C/C++
+     Example A.35.3c
+
+19   #include <stdio.h>
+20   #include <stdlib.h>
+21   #include <omp.h>
+
+22   omp_lock_t *new_lock()
+23   {
+24     omp_lock_t *lock_ptr;
+
+25       #pragma omp single copyprivate(lock_ptr)
+26       {
+27         lock_ptr = (omp_lock_t *) malloc(sizeof(omp_lock_t));
+28         omp_init_lock( lock_ptr );
+29       }
+
+30       return lock_ptr;
+31   }
+                                            C/C++
+
+
+                                                         Appendix A      Examples      263
+                                                         Fortran
+                  Example A.35.3f
+
+1                         FUNCTION NEW_LOCK()
+2                         USE OMP_LIB       ! or INCLUDE "omp_lib.h"
+3                           INTEGER(OMP_LOCK_KIND), POINTER :: NEW_LOCK
+
+4                 !$OMP   SINGLE
+5                           ALLOCATE(NEW_LOCK)
+6                           CALL OMP_INIT_LOCK(NEW_LOCK)
+7                 !$OMP   END SINGLE COPYPRIVATE(NEW_LOCK)
+8                       END FUNCTION NEW_LOCK
+
+
+ 9                Note that the effect of the copyprivate clause on a variable with the allocatable
+10                attribute is different than on a variable with the pointer attribute. The value of A is
+11                copied (as if by intrinsic assignment) and the pointer B is copied (as if by pointer
+12                assignment) to the corresponding list items in the other implicit tasks belonging to the
+13                parallel region.
+
+                  Example A.35.4f
+
+14                        SUBROUTINE S(N)
+15                        INTEGER N
+
+16                         REAL, DIMENSION(:), ALLOCATABLE :: A
+17                         REAL, DIMENSION(:), POINTER :: B
+18
+19                         ALLOCATE (A(N))
+20                !$OMP    SINGLE
+21                           ALLOCATE (B(N))
+22                           READ (11) A,B
+23                !$OMP    END SINGLE COPYPRIVATE(A,B)
+24                         ! Variable A is private and is
+25                         ! assigned the same value in each thread
+26                         ! Variable B is shared
+
+27                !$OMP   BARRIER
+28                !$OMP   SINGLE
+29                          DEALLOCATE (B)
+30                !$OMP   END SINGLE NOWAIT
+31                      END SUBROUTINE S
+
+                                                         Fortran
+
+
+
+
+     264   OpenMP API • DRAFT Version 3.1.2011-0130
+1    A.36   Nested Loop Constructs
+2           The following example of loop construct nesting (see Section 2.10 on page 109) is
+3           conforming because the inner and outer loop regions bind to different parallel
+4           regions:
+
+
+                                                  C/C++
+            Example A.36.1c
+
+5           void work(int i, int j) {}
+
+ 6          void good_nesting(int n)
+ 7          {
+ 8            int i, j;
+ 9            #pragma omp parallel default(shared)
+10            {
+11              #pragma omp for
+12              for (i=0; i<n; i++) {
+13                #pragma omp parallel shared(i, n)
+14                {
+15                  #pragma omp for
+16                  for (j=0; j < n; j++)
+17                    work(i, j);
+18                }
+19              }
+20            }
+21          }
+                                                  C/C++
+
+
+
+
+                                                               Appendix A      Examples         265
+                                                        Fortran
+                  Example A.36.1f
+
+1                         SUBROUTINE WORK(I, J)
+2                         INTEGER I, J
+3                         END SUBROUTINE WORK
+
+4                         SUBROUTINE GOOD_NESTING(N)
+5                         INTEGER N
+
+ 6                          INTEGER I
+ 7                !$OMP     PARALLEL DEFAULT(SHARED)
+ 8                !$OMP       DO
+ 9                            DO I = 1, N
+10                !$OMP          PARALLEL SHARED(I,N)
+11                !$OMP            DO
+12                                 DO J = 1, N
+13                                    CALL WORK(I,J)
+14                                 END DO
+15                !$OMP          END PARALLEL
+16                            END DO
+17                !$OMP     END PARALLEL
+18                        END SUBROUTINE GOOD_NESTING
+
+                                                        Fortran
+
+
+
+
+     266   OpenMP API • DRAFT Version 3.1.2011-0130
+1    The following variation of the preceding example is also conforming:
+
+
+                                           C/C++
+     Example A.36.2c
+
+2    void work(int i, int j) {}
+
+
+ 3   void work1(int i, int n)
+ 4   {
+ 5     int j;
+ 6     #pragma omp parallel default(shared)
+ 7     {
+ 8       #pragma omp for
+ 9       for (j=0; j<n; j++)
+10         work(i, j);
+11     }
+12   }
+
+
+13   void good_nesting2(int n)
+14   {
+15     int i;
+16     #pragma omp parallel default(shared)
+17     {
+18       #pragma omp for
+19       for (i=0; i<n; i++)
+20         work1(i, n);
+21     }
+22   }
+                                           C/C++
+
+
+
+
+                                                        Appendix A      Examples   267
+                                                         Fortran
+                  Example A.36.2f
+
+1                        SUBROUTINE WORK(I, J)
+2                        INTEGER I, J
+3                        END SUBROUTINE WORK
+
+ 4                      SUBROUTINE WORK1(I, N)
+ 5                      INTEGER J
+ 6                !$OMP PARALLEL DEFAULT(SHARED)
+ 7                !$OMP DO
+ 8                        DO J = 1, N
+ 9                          CALL WORK(I,J)
+10                        END DO
+11                !$OMP END PARALLEL
+12                      END SUBROUTINE WORK1
+
+13                      SUBROUTINE GOOD_NESTING2(N)
+14                      INTEGER N
+15                !$OMP PARALLEL DEFAULT(SHARED)
+16                !$OMP DO
+17                      DO I = 1, N
+18                         CALL WORK1(I, N)
+19                      END DO
+20                !$OMP END PARALLEL
+21                      END SUBROUTINE GOOD_NESTING2
+
+                                                         Fortran
+
+
+
+
+22   A.37         Restrictions on Nesting of Regions
+23                The examples in this section illustrate the region nesting rules. For more information on
+24                region nesting, see Section 2.10 on page 109.
+
+
+
+
+     268   OpenMP API • DRAFT Version 3.1.2011-0130
+1    The following example is non-conforming because the inner and outer loop regions are
+2    closely nested:
+
+
+                                           C/C++
+     Example A.37.1c
+
+3    void work(int i, int j) {}
+
+ 4   void wrong1(int n)
+ 5   {
+ 6     #pragma omp parallel default(shared)
+ 7     {
+ 8       int i, j;
+ 9       #pragma omp for
+10       for (i=0; i<n; i++) {
+11          /* incorrect nesting of loop regions */
+12          #pragma omp for
+13            for (j=0; j<n; j++)
+14              work(i, j);
+15       }
+16     }
+17   }
+                                          C/C++
+
+                                          Fortran
+     Example A.37.1f
+
+18           SUBROUTINE WORK(I, J)
+19           INTEGER I, J
+20           END SUBROUTINE WORK
+
+21           SUBROUTINE WRONG1(N)
+22           INTEGER N
+
+23           INTEGER I,J
+24   !$OMP   PARALLEL DEFAULT(SHARED)
+25   !$OMP     DO
+26             DO I = 1, N
+27   !$OMP        DO              ! incorrect nesting of loop regions
+28                DO J = 1, N
+29                   CALL WORK(I,J)
+30                END DO
+31             END DO
+32   !$OMP   END PARALLEL
+33         END SUBROUTINE WRONG1
+
+                                          Fortran
+
+
+
+                                                       Appendix A      Examples      269
+1                 The following orphaned version of the preceding example is also non-conforming:
+                                                       C/C++
+                  Example A.37.2c
+
+ 2                void work(int i, int j) {}
+ 3                void work1(int i, int n)
+ 4                {
+ 5                  int j;
+ 6                /* incorrect nesting of loop regions */
+ 7                  #pragma omp for
+ 8                    for (j=0; j<n; j++)
+ 9                      work(i, j);
+10                }
+
+11                void wrong2(int n)
+12                {
+13                  #pragma omp parallel default(shared)
+14                  {
+15                    int i;
+16                    #pragma omp for
+17                      for (i=0; i<n; i++)
+18                         work1(i, n);
+19                  }
+20                }
+                                                       C/C++
+
+                                                       Fortran
+                  Example A.37.2f
+
+21                        SUBROUTINE WORK1(I,N)
+22                        INTEGER I, N
+23                        INTEGER J
+24                !$OMP    DO        ! incorrect nesting of loop regions
+25                         DO J = 1, N
+26                            CALL WORK(I,J)
+27                         END DO
+28                        END SUBROUTINE WORK1
+29                        SUBROUTINE WRONG2(N)
+30                        INTEGER N
+31                        INTEGER I
+32                !$OMP    PARALLEL DEFAULT(SHARED)
+33                !$OMP       DO
+34                            DO I = 1, N
+35                               CALL WORK1(I,N)
+36                            END DO
+37                !$OMP    END PARALLEL
+38                        END SUBROUTINE WRONG2
+
+                                                       Fortran
+
+
+     270   OpenMP API • DRAFT Version 3.1.2011-0130
+1    The following example is non-conforming because the loop and single regions are
+2    closely nested:
+
+
+                                         C/C++
+     Example A.37.3c
+
+ 3   void work(int i, int j) {}
+ 4   void wrong3(int n)
+ 5   {
+ 6     #pragma omp parallel default(shared)
+ 7     {
+ 8       int i;
+ 9       #pragma omp for
+10         for (i=0; i<n; i++) {
+11   /* incorrect nesting of regions */
+12           #pragma omp single
+13              work(i, 0);
+14         }
+15     }
+16   }
+                                         C/C++
+
+                                         Fortran
+     Example A.37.3f
+
+17           SUBROUTINE WRONG3(N)
+18           INTEGER N
+
+19           INTEGER I
+20   !$OMP   PARALLEL DEFAULT(SHARED)
+21   !$OMP     DO
+22             DO I = 1, N
+23   !$OMP        SINGLE            ! incorrect nesting of regions
+24                  CALL WORK(I, 1)
+25   !$OMP        END SINGLE
+26             END DO
+27   !$OMP   END PARALLEL
+28         END SUBROUTINE WRONG3
+
+                                         Fortran
+
+
+
+
+                                                      Appendix A     Examples     271
+1                 The following example is non-conforming because a barrier region cannot be closely
+2                 nested inside a loop region:
+
+
+                                                       C/C++
+                  Example A.37.4c
+
+3                 void work(int i, int j) {}
+4                 void wrong4(int n)
+5                 {
+
+ 6                  #pragma omp parallel default(shared)
+ 7                  {
+ 8                    int i;
+ 9                    #pragma omp for
+10                      for (i=0; i<n; i++) {
+11                        work(i, 0);
+12                /* incorrect nesting of barrier region in a loop region */
+13                        #pragma omp barrier
+14                        work(i, 1);
+15                      }
+16                  }
+17                }
+                                                       C/C++
+
+                                                      Fortran
+                  Example A.37.4f
+
+18                        SUBROUTINE WRONG4(N)
+19                        INTEGER N
+
+20                        INTEGER I
+21                !$OMP   PARALLEL DEFAULT(SHARED)
+22                !$OMP     DO
+23                          DO I = 1, N
+24                             CALL WORK(I, 1)
+25                ! incorrect nesting of barrier region in a loop region
+26                !$OMP        BARRIER
+27                             CALL WORK(I, 2)
+28                          END DO
+29                !$OMP   END PARALLEL
+30                      END SUBROUTINE WRONG4
+
+                                                      Fortran
+
+
+
+
+     272   OpenMP API • DRAFT Version 3.1.2011-0130
+1    The following example is non-conforming because the barrier region cannot be
+2    closely nested inside the critical region. If this were permitted, it would result in
+3    deadlock due to the fact that only one thread at a time can enter the critical region:
+
+
+                                           C/C++
+     Example A.37.5c
+
+ 4   void work(int i, int j) {}
+ 5   void wrong5(int n)
+ 6   {
+ 7     #pragma omp parallel
+ 8     {
+ 9       #pragma omp critical
+10       {
+11          work(n, 0);
+12   /* incorrect nesting of barrier region in a critical region */
+13          #pragma omp barrier
+14          work(n, 1);
+15       }
+16     }
+17   }
+                                           C/C++
+
+                                           Fortran
+     Example A.37.5f
+
+18           SUBROUTINE WRONG5(N)
+19           INTEGER N
+
+20   !$OMP   PARALLEL DEFAULT(SHARED)
+21   !$OMP     CRITICAL
+22               CALL WORK(N,1)
+23   ! incorrect nesting of barrier region in a critical region
+24   !$OMP       BARRIER
+25               CALL WORK(N,2)
+26   !$OMP     END CRITICAL
+27   !$OMP   END PARALLEL
+28         END SUBROUTINE WRONG5
+
+                                           Fortran
+
+
+
+
+                                                        Appendix A      Examples      273
+1                 The following example is non-conforming because the barrier region cannot be
+2                 closely nested inside the single region. If this were permitted, it would result in
+3                 deadlock due to the fact that only one thread executes the single region:
+
+
+                                                         C/C++
+                  Example A.37.6c
+
+ 4                void work(int i, int j) {}
+ 5                void wrong6(int n)
+ 6                {
+ 7                  #pragma omp parallel
+ 8                  {
+ 9                    #pragma omp single
+10                    {
+11                      work(n, 0);
+12                /* incorrect nesting of barrier region in a single region */
+13                      #pragma omp barrier
+14                      work(n, 1);
+15                    }
+16                  }
+17                }
+                                                         C/C++
+
+                                                        Fortran
+                  Example A.37.6f
+
+18                        SUBROUTINE WRONG6(N)
+19                         INTEGER N
+
+20                !$OMP   PARALLEL DEFAULT(SHARED)
+21                !$OMP     SINGLE
+22                            CALL WORK(N,1)
+23                ! incorrect nesting of barrier region in a single region
+24                !$OMP       BARRIER
+25                            CALL WORK(N,2)
+26                !$OMP     END SINGLE
+27                !$OMP   END PARALLEL
+28                      END SUBROUTINE WRONG6
+
+                                                         Fortran
+
+
+
+
+     274   OpenMP API • DRAFT Version 3.1.2011-0130
+1    A.38   The omp_set_dynamic and
+2           omp_set_num_threads Routines
+3           Some programs rely on a fixed, prespecified number of threads to execute correctly.
+4           Because the default setting for the dynamic adjustment of the number of threads is
+5           implementation defined, such programs can choose to turn off the dynamic threads
+6           capability and set the number of threads explicitly to ensure portability. The following
+7           example shows how to do this using omp_set_dynamic (Section 3.2.7 on page 121),
+8           and omp_set_num_threads (Section 3.2.1 on page 114).
+ 9          In this example, the program executes correctly only if it is executed by 16 threads. If
+10          the implementation is not capable of supporting 16 threads, the behavior of this example
+11          is implementation defined (See Algorithm 2.1 on page 36). Note that the number of
+12          threads executing a parallel region remains constant during the region, regardless of
+13          the dynamic threads setting. The dynamic threads mechanism determines the number of
+14          threads to use at the start of the parallel region and keeps it constant for the duration
+15          of the region.
+
+
+                                                    C/C++
+            Example A.38.1c
+
+16          #include <omp.h>
+17          #include <stdlib.h>
+
+18          void do_by_16(float *x, int iam, int ipoints) {}
+
+19          void dynthreads(float *x, int npoints)
+20          {
+21            int iam, ipoints;
+
+22              omp_set_dynamic(0);
+23              omp_set_num_threads(16);
+
+24              #pragma omp parallel shared(x, npoints) private(iam, ipoints)
+25              {
+26                if (omp_get_num_threads() != 16)
+27                  abort();
+
+28                  iam = omp_get_thread_num();
+29                  ipoints = npoints/16;
+30                  do_by_16(x, iam, ipoints);
+31              }
+32          }
+                                                    C/C++
+
+
+
+                                                                 Appendix A       Examples       275
+                                                         Fortran
+                  Example A.38.1f
+
+1                         SUBROUTINE DO_BY_16(X, IAM, IPOINTS)
+2                           REAL X(*)
+3                           INTEGER IAM, IPOINTS
+4                         END SUBROUTINE DO_BY_16
+
+5                         SUBROUTINE DYNTHREADS(X, NPOINTS)
+
+6                          INCLUDE "omp_lib.h"          ! or USE OMP_LIB
+
+7                          INTEGER NPOINTS
+8                          REAL X(NPOINTS)
+
+9                          INTEGER IAM, IPOINTS
+
+10                         CALL OMP_SET_DYNAMIC(.FALSE.)
+11                         CALL OMP_SET_NUM_THREADS(16)
+
+12                !$OMP    PARALLEL SHARED(X,NPOINTS) PRIVATE(IAM, IPOINTS)
+
+13                           IF (OMP_GET_NUM_THREADS() .NE. 16) THEN
+14                             STOP
+15                           ENDIF
+
+16                           IAM = OMP_GET_THREAD_NUM()
+17                           IPOINTS = NPOINTS/16
+18                           CALL DO_BY_16(X,IAM,IPOINTS)
+
+19                !$OMP    END PARALLEL
+
+20                        END SUBROUTINE DYNTHREADS
+
+                                                         Fortran
+
+
+
+
+21   A.39         The omp_get_num_threads Routine
+22                In the following example, the omp_get_num_threads call (see Section 3.2.2 on
+23                page 115) returns 1 in the sequential part of the code, so np will always be equal to 1.
+24                To determine the number of threads that will be deployed for the parallel region, the
+25                call should be inside the parallel region.
+
+
+
+
+     276   OpenMP API • DRAFT Version 3.1.2011-0130
+                                          C/C++
+     Example A.39.1c
+
+1    #include <omp.h>
+2    void work(int i);
+
+3    void incorrect()
+4    {
+5      int np, i;
+
+6        np = omp_get_num_threads();   /* misplaced */
+
+ 7       #pragma omp parallel for schedule(static)
+ 8       for (i=0; i < np; i++)
+ 9         work(i);
+10   }
+                                          C/C++
+
+                                         Fortran
+     Example A.39.1f
+
+11           SUBROUTINE WORK(I)
+12           INTEGER I
+13             I = I + 1
+14           END SUBROUTINE WORK
+
+15           SUBROUTINE INCORRECT()
+16             INCLUDE "omp_lib.h"       ! or USE OMP_LIB
+17             INTEGER I, NP
+
+18           NP = OMP_GET_NUM_THREADS()   !misplaced: will return 1
+19   !$OMP   PARALLEL DO SCHEDULE(STATIC)
+20             DO I = 0, NP-1
+21               CALL WORK(I)
+22             ENDDO
+23   !$OMP   END PARALLEL DO
+24         END SUBROUTINE INCORRECT
+
+                                         Fortran
+
+
+
+
+                                                     Appendix A   Examples   277
+1                 The following example shows how to rewrite this program without including a query for
+2                 the number of threads:
+
+
+                                                        C/C++
+                  Example A.39.2c
+
+3                 #include <omp.h>
+4                 void work(int i);
+
+5                 void correct()
+6                 {
+7                   int i;
+
+ 8                    #pragma omp parallel private(i)
+ 9                    {
+10                      i = omp_get_thread_num();
+11                      work(i);
+12                    }
+13                }
+                                                        C/C++
+
+                                                        Fortran
+                  Example A.39.2f
+
+14                        SUBROUTINE WORK(I)
+15                          INTEGER I
+16
+17                         I = I + 1
+
+18                        END SUBROUTINE WORK
+19
+20                        SUBROUTINE CORRECT()
+21                          INCLUDE "omp_lib.h"      ! or USE OMP_LIB
+22                          INTEGER I
+
+23                !$OMP     PARALLEL PRIVATE(I)
+24                           I = OMP_GET_THREAD_NUM()
+25                           CALL WORK(I)
+26                !$OMP    END PARALLEL
+
+27                        END SUBROUTINE CORRECT
+
+                                                        Fortran
+
+
+
+
+     278   OpenMP API • DRAFT Version 3.1.2011-0130
+1    A.40   The omp_init_lock Routine
+2           The following example demonstrates how to initialize an array of locks in a parallel
+3           region by using omp_init_lock (Section 3.3.1 on page 141).
+
+
+                                                  C/C++
+            Example A.40.1c
+
+4           #include <omp.h>
+
+5           omp_lock_t *new_locks()
+6           {
+7             int i;
+8             omp_lock_t *lock = new omp_lock_t[1000];
+
+ 9              #pragma omp parallel for private(i)
+10                for (i=0; i<1000; i++)
+11                {
+12                  omp_init_lock(&lock[i]);
+13                }
+14                return lock;
+15          }
+                                                 C/C++
+
+                                                 Fortran
+            Example A.40.1f
+
+16                  FUNCTION NEW_LOCKS()
+17                    USE OMP_LIB        ! or INCLUDE "omp_lib.h"
+18                    INTEGER(OMP_LOCK_KIND), DIMENSION(1000) :: NEW_LOCKS
+
+19                    INTEGER I
+
+20          !$OMP     PARALLEL DO PRIVATE(I)
+21                      DO I=1,1000
+22                        CALL OMP_INIT_LOCK(NEW_LOCKS(I))
+23                      END DO
+24          !$OMP     END PARALLEL DO
+25
+26                  END FUNCTION NEW_LOCKS
+
+                                                 Fortran
+
+
+
+
+                                                              Appendix A      Examples      279
+1    A.41         Ownership of Locks
+2                 Ownership of locks has changed since OpenMP 2.5. In OpenMP 2.5, locks are owned by
+3                 threads; so a lock released by the omp_unset_lock routine must be owned by the
+4                 same thread executing the routine. With OpenMP 3.0, locks are owned by task regions;
+5                 so a lock released by the omp_unset_lock routine in a task region must be owned by
+6                 the same task region.
+
+
+ 7                This change in ownership requires extra care when using locks. The following program
+ 8                is conforming in OpenMP 2.5 because the thread that releases the lock lck in the parallel
+ 9                region is the same thread that acquired the lock in the sequential part of the program
+10                (master thread of parallel region and the initial thread are the same). However, it is not
+11                conforming in OpenMP 3.0 and 3.1, because the task region that releases the lock lck is
+12                different from the task region that acquires the lock.
+
+
+                                                          C/C++
+                  Example A.41.1c
+
+13                #include <stdlib.h>
+14                #include <stdio.h>
+15                #include <omp.h>
+
+16                int main()
+17                {
+18                  int x;
+19                  omp_lock_t lck;
+20
+21                    omp_init_lock (&lck);
+22                    omp_set_lock (&lck);
+23                    x = 0;
+
+24                #pragma omp parallel shared (x)
+25                  {
+26                    #pragma omp master
+27                      {
+28                        x = x + 1;
+29                        omp_unset_lock (&lck);
+30                      }
+
+31                        /* Some more stuff. */
+32                    }
+33
+34                    omp_destroy_lock (&lck);
+35                }
+                                                          C/C++
+
+     280   OpenMP API • DRAFT Version 3.1.2011-0130
+                                                     Fortran
+            Example A.41.1f
+
+1                    program lock
+2                    use omp_lib
+3                    integer :: x
+4                    integer (kind=omp_lock_kind) :: lck
+
+5                    call omp_init_lock (lck)
+6                    call omp_set_lock(lck)
+7                    x = 0
+
+ 8          !$omp parallel shared (x)
+ 9          !$omp master
+10                  x = x + 1
+11                  call omp_unset_lock(lck)
+12          !$omp end master
+13
+14          !       Some more stuff.
+15          !$omp end parallel
+
+16                   call omp_destroy_lock(lck)
+17                   end
+
+                                                     Fortran
+
+
+
+
+18   A.42   Simple Lock Routines
+19          In the following example (for Section 3.3 on page 139), the lock routines cause the
+20          threads to be idle while waiting for entry to the first critical section, but to do other work
+21          while waiting for entry to the second. The omp_set_lock function blocks, but the
+22          omp_test_lock function does not, allowing the work in skip to be done.
+
+
+
+
+                                                                    Appendix A        Examples       281
+                                                        C/C++
+1                 Note that the argument to the lock routines should have type omp_lock_t, and that
+2                 there is no need to flush it.
+
+                  Example A.42.1c
+
+3                 #include <stdio.h>
+4                 #include <omp.h>
+
+5                 void skip(int i) {}
+6                 void work(int i) {}
+
+ 7                int main()
+ 8                {
+ 9                  omp_lock_t lck;
+10                  int id;
+
+11                    omp_init_lock(&lck);
+
+12                    #pragma omp parallel shared(lck) private(id)
+13                    {
+14                      id = omp_get_thread_num();
+
+15                        omp_set_lock(&lck);
+16                        /* only one thread at a time can execute this printf */
+17                        printf("My thread id is %d.\n", id);
+18                        omp_unset_lock(&lck);
+
+19                        while (! omp_test_lock(&lck)) {
+20                          skip(id);   /* we do not yet have the lock,
+21                                         so we must do something else */
+22                        }
+
+23                        work(id);     /* we now have the lock
+24                                         and can do the work */
+
+25                        omp_unset_lock(&lck);
+26                    }
+
+27                    omp_destroy_lock(&lck);
+28
+29                    return 0;
+30                }
+                                                        C/C++
+
+
+
+
+     282   OpenMP API • DRAFT Version 3.1.2011-0130
+                                             Fortran
+1    Note that there is no need to flush the lock variable.
+
+     Example A.42.1f
+
+2            SUBROUTINE SKIP(ID)
+3            END SUBROUTINE SKIP
+
+4            SUBROUTINE WORK(ID)
+5            END SUBROUTINE WORK
+
+6            PROGRAM SIMPLELOCK
+
+7              INCLUDE "omp_lib.h"         ! or USE OMP_LIB
+
+8              INTEGER(OMP_LOCK_KIND) LCK
+9              INTEGER ID
+
+10             CALL OMP_INIT_LOCK(LCK)
+
+11   !$OMP     PARALLEL SHARED(LCK) PRIVATE(ID)
+12               ID = OMP_GET_THREAD_NUM()
+13               CALL OMP_SET_LOCK(LCK)
+14               PRINT *, 'My thread id is ', ID
+15               CALL OMP_UNSET_LOCK(LCK)
+
+16              DO WHILE (.NOT. OMP_TEST_LOCK(LCK))
+17                CALL SKIP(ID)     ! We do not yet have the lock
+18                                  ! so we must do something else
+19              END DO
+
+20              CALL WORK(ID)           ! We now have the lock
+21                                      ! and can do the work
+
+22              CALL OMP_UNSET_LOCK( LCK )
+
+23   !$OMP     END PARALLEL
+
+24             CALL OMP_DESTROY_LOCK( LCK )
+
+25           END PROGRAM SIMPLELOCK
+
+                                             Fortran
+
+
+
+
+                                                              Appendix A   Examples   283
+1    A.43         Nestable Lock Routines
+2                 The following example (for Section 3.3 on page 139) demonstrates how a nestable lock
+3                 can be used to synchronize updates both to a whole structure and to one of its members.
+
+
+                                                         C/C++
+                  Example A.43.1c
+
+4                 #include <omp.h>
+5                 typedef struct {
+6                       int a,b;
+7                       omp_nest_lock_t lck; } pair;
+
+ 8                int work1();
+ 9                int work2();
+10                int work3();
+11                void incr_a(pair *p, int a)
+12                {
+13                  /* Called only from incr_pair, no need to lock. */
+14                  p->a += a;
+15                }
+16                void incr_b(pair *p, int b)
+17                {
+18                  /* Called both from incr_pair and elsewhere, */
+19                  /* so need a nestable lock. */
+
+20                  omp_set_nest_lock(&p->lck);
+21                  p->b += b;
+22                  omp_unset_nest_lock(&p->lck);
+23                }
+24                void incr_pair(pair *p, int a, int b)
+25                {
+26                  omp_set_nest_lock(&p->lck);
+27                  incr_a(p, a);
+28                  incr_b(p, b);
+29                  omp_unset_nest_lock(&p->lck);
+30                }
+31                void nestlock(pair *p)
+32                {
+33                  #pragma omp parallel sections
+34                  {
+35                    #pragma omp section
+36                      incr_pair(p, work1(), work2());
+37                    #pragma omp section
+38                      incr_b(p, work3());
+39                  }
+40                }
+                                                         C/C++
+
+
+     284   OpenMP API • DRAFT Version 3.1.2011-0130
+                                     Fortran
+     Example A.43.1f
+
+1         MODULE DATA
+2           USE OMP_LIB, ONLY: OMP_NEST_LOCK_KIND
+3           TYPE LOCKED_PAIR
+4             INTEGER A
+5             INTEGER B
+6             INTEGER (OMP_NEST_LOCK_KIND) LCK
+7          END TYPE
+8         END MODULE DATA
+
+ 9        SUBROUTINE INCR_A(P, A)
+10          ! called only from INCR_PAIR, no need to lock
+11          USE DATA
+12          TYPE(LOCKED_PAIR) :: P
+13          INTEGER A
+14          P%A = P%A + A
+15        END SUBROUTINE INCR_A
+
+16        SUBROUTINE INCR_B(P, B)
+17          ! called from both INCR_PAIR and elsewhere,
+18          ! so we need a nestable lock
+19          USE OMP_LIB       ! or INCLUDE "omp_lib.h"
+20          USE DATA
+21          TYPE(LOCKED_PAIR) :: P
+22          INTEGER B
+23          CALL OMP_SET_NEST_LOCK(P%LCK)
+24          P%B = P%B + B
+25          CALL OMP_UNSET_NEST_LOCK(P%LCK)
+26        END SUBROUTINE INCR_B
+
+27        SUBROUTINE INCR_PAIR(P, A, B)
+28          USE OMP_LIB        ! or INCLUDE "omp_lib.h"
+29          USE DATA
+30          TYPE(LOCKED_PAIR) :: P
+31          INTEGER A
+32          INTEGER B
+
+33          CALL OMP_SET_NEST_LOCK(P%LCK)
+34          CALL INCR_A(P, A)
+35          CALL INCR_B(P, B)
+36          CALL OMP_UNSET_NEST_LOCK(P%LCK)
+37        END SUBROUTINE INCR_PAIR
+
+38        SUBROUTINE NESTLOCK(P)
+39          USE OMP_LIB        ! or INCLUDE "omp_lib.h"
+40          USE DATA
+41          TYPE(LOCKED_PAIR) :: P
+42          INTEGER WORK1, WORK2, WORK3
+43          EXTERNAL WORK1, WORK2, WORK3
+
+
+
+
+                                                    Appendix A   Examples   285
+1                !$OMP    PARALLEL SECTIONS
+
+2                !$OMP    SECTION
+3                           CALL INCR_PAIR(P, WORK1(), WORK2())
+4                !$OMP    SECTION
+5                           CALL INCR_B(P, WORK3())
+6                !$OMP    END PARALLEL SECTIONS
+
+7                        END SUBROUTINE NESTLOCK
+
+                                                   Fortran
+
+
+
+
+    286   OpenMP API • DRAFT Version 3.1.2011-0130
